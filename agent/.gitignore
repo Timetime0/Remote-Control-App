@@ -1,0 +1,21 @@
+# Build directories
+build/
+cmake-build-*/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+Makefile
+cmake_install.cmake
+
+# Built binaries
+remote_agent
+remote_agent_test
+*.exe
+*.out
+*.app
+
+# OS/editor files
+.DS_Store
+*.swp
