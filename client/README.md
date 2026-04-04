@@ -2,6 +2,8 @@
 
 Desktop app dùng để điều khiển nhiều máy từ xa (multi-PC dashboard).
 
+**Giao tiếp với Agent (BE):** UI → `preload` → `ipcMain` → TCP tới máy đích. Sơ đồ đầy đủ: [`../docs/architecture.md`](../docs/architecture.md).
+
 ## Tech stack
 
 - Electron Forge

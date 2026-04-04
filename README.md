@@ -66,6 +66,52 @@
   - Xác thực, định tuyến kết nối
   - NAT traversal (nâng cao)
 
+### 3a) FE ↔ BE: phương thức kết nối (implementation hiện tại)
+
+**Trong một máy (Electron):** React (renderer) **không** kết nối TCP trực tiếp; UI gọi `window.remoteApi` → **preload** → **`ipcMain`** (IPC nội bộ Electron).
+
+**Giữa hai máy:** process **main** của Electron dùng **`node:net`** (TCP client) kết nối tới **Agent C++** đang **listen TCP** trên IP:port. Mỗi lệnh: gửi **một dòng text** kết thúc `\n`, nhận **một dòng JSON** từ agent.
+
+Bản chi tiết + sơ đồ đầy đủ: [`docs/architecture.md`](docs/architecture.md).
+
+#### Sequence diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant R as React UI
+    participant P as Preload
+    participant M as Electron Main
+    participant T as TCP client
+    participant A as Agent C++ server
+
+    R->>P: remoteApi.runCommand(pcId, cmd)
+    P->>M: ipc invoke agent:run-command
+    M->>T: connect(host, port) + write(cmd\n)
+    T->>A: TCP
+    A-->>T: JSON line\n
+    T-->>M: first line
+    M-->>P: { ok, message, raw }
+    P-->>R: UI update
+```
+
+#### Flowchart (tổng quát)
+
+```mermaid
+flowchart TD
+    subgraph Client_PC["Máy điều khiển"]
+        UI[React]
+        IPC[ipcMain + TCP]
+        UI --> IPC
+    end
+    NET((TCP/IP))
+    subgraph Agent_PC["Máy bị điều khiển"]
+        AG[Agent C++]
+    end
+    IPC --> NET
+    NET --> AG
+```
+
 ## 4) Mapping chức năng -> công nghệ
 
 - **List/Start/Stop app & process**: C++ + OS API (`CreateToolhelp32Snapshot`, `tasklist`, `/proc`...).
