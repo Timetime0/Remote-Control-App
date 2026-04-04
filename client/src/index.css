@@ -1,6 +1,11 @@
 :root {
   color-scheme: dark;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
 }
 
 * {
@@ -46,6 +51,41 @@ body {
   display: grid;
   grid-template-columns: 2fr 100px 1.5fr 120px auto auto auto;
   gap: 10px;
+}
+
+.copy-form {
+  grid-template-columns: 1.2fr 1.2fr auto auto;
+}
+
+.transfer-form {
+  display: grid;
+  gap: 10px;
+}
+
+.transfer-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.transfer-row {
+  display: flex;
+  gap: 10px;
+}
+
+.remote-file-list {
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.remote-file-item {
+  text-align: left;
 }
 
 .server-form input,
@@ -129,6 +169,10 @@ body {
   font-size: 12px;
 }
 
+.muted {
+  color: #94a3b8;
+}
+
 .online {
   background: rgba(34, 197, 94, 0.15);
   color: #4ade80;
@@ -153,11 +197,32 @@ body {
   border-color: #2563eb;
 }
 
+.btn-danger {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #b91c1c;
+  color: #fecaca;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.28);
+}
+
+.btn-icon {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .feature-list {
   margin: 0;
   padding-left: 18px;
   display: grid;
   gap: 8px;
+}
+
+.feature-shortcuts {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .command-grid {
@@ -196,4 +261,152 @@ body {
   .server-form {
     grid-template-columns: 1fr;
   }
+}
+
+/* Process list modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.modal-panel {
+  width: min(720px, 100%);
+  max-height: min(80vh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.45);
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #1f2937;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-close {
+  flex-shrink: 0;
+}
+
+.process-modal {
+  max-width: min(900px, 100%);
+  max-height: min(85vh, 720px);
+}
+
+.modal-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: normal;
+}
+
+.process-modal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid #1f2937;
+}
+
+.process-start-input {
+  flex: 1;
+  min-width: 160px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b1220;
+  color: #e2e8f0;
+  padding: 8px 10px;
+}
+
+.process-table-wrap {
+  overflow: auto;
+  padding: 0 16px 16px;
+  max-height: 48vh;
+}
+
+.process-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.process-table th,
+.process-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #1f2937;
+}
+
+.process-table th {
+  color: #94a3b8;
+  position: sticky;
+  top: 0;
+  background: #111827;
+}
+
+.process-table tbody tr {
+  cursor: pointer;
+}
+
+.process-table tbody tr:hover {
+  background: #1e293b;
+}
+
+.process-table tbody tr.selected {
+  background: rgba(37, 99, 235, 0.2);
+}
+
+.pid-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #93c5fd;
+  width: 72px;
+}
+
+.modal-body-inline {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: #cbd5e1;
+}
+
+.screenshot-modal {
+  max-width: min(1100px, 100%);
+  max-height: min(90vh, 900px);
+}
+
+.screenshot-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.screenshot-body {
+  overflow: auto;
+  padding: 12px 16px 16px;
+}
+
+.screenshot-image {
+  width: 100%;
+  height: auto;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #020617;
 }

