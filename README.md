@@ -4,13 +4,25 @@
 
 ## 1) Mục tiêu chức năng
 
-- List / Start / Stop ứng dụng
-- List / Start / Stop / Kill process
-- Chụp màn hình máy bị điều khiển
-- Bắt phím nhấn (keylogger)
-- Copy file 2 chiều
-- Shutdown / Restart máy bị điều khiển
-- Start webcam, record video
+### macOS
+
+- [x] List / Start / Stop ứng dụng
+- [x] List / Start / Stop / Kill process
+- [x] Chụp màn hình máy bị điều khiển
+- [x] Bắt phím nhấn (keylogger)
+- [x] Copy file 2 chiều
+- [x] Shutdown / Restart máy bị điều khiển
+- [ ] Start webcam, record video
+
+
+### WIN
+- [ ] List / Start / Stop ứng dụng
+- [ ] List / Start / Stop / Kill process
+- [ ] Chụp màn hình máy bị điều khiển
+- [ ] Bắt phím nhấn (keylogger)
+- [ ] Copy file 2 chiều
+- [ ] Shutdown / Restart máy bị điều khiển
+- [ ] Start webcam, record video
 
 ## 2) Tech stack đề xuất
 
@@ -31,7 +43,6 @@
 - **OS Native APIs**:
   - Windows: Win32 API (process, screenshot, keyboard hook, shutdown).
   - macOS: Quartz/CoreGraphics, IOKit, NSWorkspace, Accessibility API.
-  - Linux: X11/Wayland tools, `/proc`, systemd/shutdown commands.
 
 ### Kết nối & giao thức
 

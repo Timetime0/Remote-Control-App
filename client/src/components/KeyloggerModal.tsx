@@ -1,4 +1,5 @@
 import { useModalEscape } from '../hooks/useModalEscape';
+import { formatKeyloggerForDisplay } from '../utils/formatKeyloggerLog';
 
 type KeyloggerModalProps = {
   open: boolean;
@@ -57,12 +58,14 @@ function KeyloggerModal({
           >
             Stop keylogger
           </button>
-          <button className="btn" disabled={busy} onClick={onRefresh} type="button">
-            Refresh log
-          </button>
         </div>
         <div className="process-table-wrap">
-          <pre className="modal-body-inline">{content || '(empty log)'}</pre>
+          <p className="modal-sub keylogger-log-hint">
+            Log shown in local time; key names follow macOS US layout (raw keycodes from agent).
+          </p>
+          <pre className="modal-body-inline">
+            {content ? formatKeyloggerForDisplay(content) : '(empty log)'}
+          </pre>
         </div>
       </div>
     </div>

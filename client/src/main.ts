@@ -34,7 +34,7 @@ type RemotePc = {
   host: string;
   port: number;
   status: 'Online' | 'Offline';
-  os: 'Windows' | 'macOS' | 'Linux';
+  os: 'Windows' | 'macOS';
 };
 
 type RemotePcConfig = Omit<RemotePc, 'status'>;
@@ -94,7 +94,7 @@ ipcMain.handle(
   'agent:add-pc',
   async (
     _event,
-    payload: { name: string; host: string; port: number; os: 'Windows' | 'macOS' | 'Linux' },
+    payload: { name: string; host: string; port: number; os: 'Windows' | 'macOS' },
   ): Promise<RemotePc[]> => {
     const host = payload.host.trim();
     const name = payload.name.trim();

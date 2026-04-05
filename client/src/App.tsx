@@ -27,7 +27,7 @@ function App() {
   const [appSession, setAppSession] = useState<AppListSession | null>(null);
   const [copyLocalPath, setCopyLocalPath] = useState('');
   const [copyRemotePath, setCopyRemotePath] = useState('');
-  const [copyRemoteDir, setCopyRemoteDir] = useState('/tmp');
+  const [copyRemoteDir, setCopyRemoteDir] = useState('~');
   const [copyRemoteFiles, setCopyRemoteFiles] = useState<string[]>([]);
   const [selectedRemoteFile, setSelectedRemoteFile] = useState<string | null>(null);
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
@@ -323,16 +323,31 @@ function App() {
     }
   };
 
-  const uploadFileToRemote = async () => {
+  const resetFileTransferPaths = () => {
+    setCopyLocalPath('');
+    setCopyRemotePath('');
+    setCopyRemoteDir('~');
+    setCopyRemoteFiles([]);
+    setSelectedRemoteFile(null);
+  };
+
+  const closeFileTransferModal = () => {
+    resetFileTransferPaths();
+    setFileTransferOpen(false);
+  };
+
+  const uploadFileToRemote = async (): Promise<CommandResult> => {
     if (!selectedPc) {
-      appendLog('No PC selected.');
-      return;
+      const message = 'No PC selected.';
+      appendLog(message);
+      return { ok: false, message, raw: '' };
     }
     const localPath = copyLocalPath.trim();
     const remotePath = copyRemotePath.trim();
     if (!localPath || !remotePath) {
-      appendLog('Upload: cần nhập local path và remote path.');
-      return;
+      const message = 'Upload: need local file and remote file name or path.';
+      appendLog(message);
+      return { ok: false, message, raw: '' };
     }
     setCopyBusy(true);
     try {
@@ -342,21 +357,28 @@ function App() {
           result.raw ? ` | ${result.raw}` : ''
         }`,
       );
+      return result;
+    } catch (error) {
+      const message = (error as Error).message;
+      appendLog(`Upload failed: ${message}`);
+      return { ok: false, message, raw: '' };
     } finally {
       setCopyBusy(false);
     }
   };
 
-  const downloadFileFromRemote = async () => {
+  const downloadFileFromRemote = async (): Promise<CommandResult> => {
     if (!selectedPc) {
-      appendLog('No PC selected.');
-      return;
+      const message = 'No PC selected.';
+      appendLog(message);
+      return { ok: false, message, raw: '' };
     }
     const localPath = copyLocalPath.trim();
     const remotePath = (selectedRemoteFile || copyRemotePath).trim();
     if (!localPath || !remotePath) {
-      appendLog('Download: cần nhập remote path và local path.');
-      return;
+      const message = 'Download: need remote file path and local save path.';
+      appendLog(message);
+      return { ok: false, message, raw: '' };
     }
     setCopyBusy(true);
     try {
@@ -366,6 +388,11 @@ function App() {
           result.raw ? ` | ${result.raw}` : ''
         }`,
       );
+      return result;
+    } catch (error) {
+      const message = (error as Error).message;
+      appendLog(`Download failed: ${message}`);
+      return { ok: false, message, raw: '' };
     } finally {
       setCopyBusy(false);
     }
@@ -464,8 +491,9 @@ function App() {
       <FileTransferModal
         busy={copyBusy}
         localPath={copyLocalPath}
-        onClose={() => setFileTransferOpen(false)}
-        onDownload={() => void downloadFileFromRemote()}
+        onClose={closeFileTransferModal}
+        onResetPaths={resetFileTransferPaths}
+        onDownload={() => downloadFileFromRemote()}
         onLoadRemoteFiles={() => void loadRemoteFiles()}
         onLocalPathChange={setCopyLocalPath}
         onPickLocalFile={() => void pickLocalFile()}
@@ -479,7 +507,7 @@ function App() {
           setSelectedRemoteFile(v);
           setCopyRemotePath(v);
         }}
-        onUpload={() => void uploadFileToRemote()}
+        onUpload={() => uploadFileToRemote()}
         open={fileTransferOpen}
         remoteDir={copyRemoteDir}
         remoteFiles={copyRemoteFiles}
@@ -544,7 +572,6 @@ function App() {
           >
             <option value="Windows">Windows</option>
             <option value="macOS">macOS</option>
-            <option value="Linux">Linux</option>
           </select>
           <button className="btn primary" onClick={() => void addServer()} type="button">
             Add Server
