@@ -15,11 +15,13 @@ function PcList({ pcs, selectedId, onSelect, onRemove }: PcListProps) {
         {pcs.map((pc) => {
           const isSelected = selectedId === pc.id;
           return (
-            <button
+            <div
               className={`pc-card ${isSelected ? 'selected' : ''}`}
               key={pc.id}
+              onKeyDown={(e) => e.key === 'Enter' && onSelect(pc)}
               onClick={() => onSelect(pc)}
-              type="button"
+              role="button"
+              tabIndex={0}
             >
               <div>
                 <h3>{pc.name}</h3>
@@ -44,7 +46,7 @@ function PcList({ pcs, selectedId, onSelect, onRemove }: PcListProps) {
                   Remove
                 </button>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>

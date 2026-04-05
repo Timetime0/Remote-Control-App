@@ -336,6 +336,10 @@ body {
   padding: 8px 10px;
 }
 
+.keylogger-log-hint {
+  margin-bottom: 8px;
+}
+
 .process-table-wrap {
   overflow: auto;
   padding: 0 16px 16px;

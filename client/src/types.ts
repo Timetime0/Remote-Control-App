@@ -4,7 +4,7 @@ export type RemotePc = {
   host: string;
   port: number;
   status: 'Online' | 'Offline';
-  os: 'Windows' | 'macOS' | 'Linux';
+  os: 'Windows' | 'macOS' ;
 };
 
 export type RemoteCommand =
@@ -31,7 +31,7 @@ export type AddPcInput = {
   name: string;
   host: string;
   port: number;
-  os: 'Windows' | 'macOS' | 'Linux';
+  os: 'Windows' | 'macOS' ;
 };
 
 /** JSON một dòng từ agent khi command = LIST_PROCESSES */
