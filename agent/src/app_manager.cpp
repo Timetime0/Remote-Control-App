@@ -5,6 +5,8 @@
 #include <sstream>
 #include <algorithm>
 #include <set>
+#include <cstdio>
+#include <cstdlib>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -18,7 +20,7 @@
 #include <filesystem>
 namespace fs = std::filesystem;
 
-// ===== UTILS =====
+// ===== UTILS (shared) =====
 static std::string escapeJson(const std::string& input) {
     std::string out;
     for (char c : input) {
@@ -36,9 +38,25 @@ static std::string json(bool ok, const std::string& msg, const std::string& cmd)
         "\",\"message\":\"" + escapeJson(msg) + "\"}";
 }
 
+static std::string joinParts(const std::vector<std::string>& parts, size_t from) {
+    std::string out;
+    for (size_t i = from; i < parts.size(); ++i) {
+        if (i > from) out += ' ';
+        out += parts[i];
+    }
+    return out;
+}
+
+#ifdef _WIN32
+
 static std::string toLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);
     return s;
+}
+
+static std::string getFileName(const std::string& path) {
+    size_t pos = path.find_last_of("\\/");
+    return (pos == std::string::npos) ? path : path.substr(pos + 1);
 }
 
 static std::string resolveAlias(const std::string& input) {
@@ -59,20 +77,13 @@ static bool match(const std::string& name, const std::string& input) {
     std::string a = toLower(name);
     std::string b = toLower(input);
 
-    // chua
     if (a.find(b) != std::string::npos) return true;
 
-    // viet tat pt -> paint
     int j = 0;
     for (char c : a) {
         if (j < b.size() && c == b[j]) j++;
     }
     return j == b.size();
-}
-
-static std::string getFileName(const std::string& path) {
-    size_t pos = path.find_last_of("\\/");
-    return (pos == std::string::npos) ? path : path.substr(pos + 1);
 }
 
 static std::string getDisplayName(const std::string& path) {
@@ -100,9 +111,6 @@ static std::string getDisplayName(const std::string& path) {
 
     return getFileName(path);
 }
-
-
-#ifdef _WIN32
 
 struct AppEntry {
     std::string name;
@@ -142,14 +150,12 @@ static void buildCache() {
     }
 }
 
-// ===== STRUCT =====
 struct AppInfo {
     int pid;
     std::string name;
     std::string path;
 };
 
-// ===== ENUM WINDOW =====
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     if (!IsWindowVisible(hwnd)) return TRUE;
 
@@ -174,7 +180,6 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     return TRUE;
 }
 
-// ===== LIST APPS =====
 std::string cmdListApps() {
     std::vector<AppInfo> apps;
     EnumWindows(EnumWindowsProc, (LPARAM)&apps);
@@ -188,7 +193,6 @@ std::string cmdListApps() {
     for (auto& app : apps) {
         std::string key = toLower(app.name);
 
-        // Bo trung lap
         if (seen.count(key)) continue;
         seen.insert(key);
 
@@ -210,14 +214,11 @@ std::string cmdListApps() {
     return "{\"ok\":true,\"command\":\"LIST_APPS\",\"items\":" + oss.str() + "}";
 }
 
-// ===== START APP =====
 std::string cmdStart(const std::vector<std::string>& parts) {
-    if (parts.size() < 2)
+    const std::string target = joinParts(parts, 1);
+    if (target.empty())
         return json(false, "missing_app", "START_APP_BY_NAME");
 
-    std::string target = parts[1];
-
-    // ===== 1. ALIAS =====
     std::string alias = resolveAlias(target);
     if (!alias.empty()) {
         HINSTANCE res = ShellExecuteA(NULL, "open", alias.c_str(), NULL, NULL, SW_SHOWNORMAL);
@@ -225,7 +226,6 @@ std::string cmdStart(const std::vector<std::string>& parts) {
             return json(true, "started " + alias, "START_APP_BY_NAME");
     }
 
-    // ===== 2. TRY DIRECT =====
     std::string tryExe = target;
     if (tryExe.find(".exe") == std::string::npos)
         tryExe += ".exe";
@@ -234,7 +234,6 @@ std::string cmdStart(const std::vector<std::string>& parts) {
     if ((INT_PTR)res > 32)
         return json(true, "started " + tryExe, "START_APP_BY_NAME");
 
-    // ===== 3. SEARCH CACHE =====
     buildCache();
 
     for (const auto& app : g_cache) {
@@ -249,12 +248,12 @@ std::string cmdStart(const std::vector<std::string>& parts) {
     return json(false, "not_found", "START_APP_BY_NAME");
 }
 
-// ===== STOP APP =====
 std::string cmdStop(const std::vector<std::string>& parts) {
-    if (parts.size() < 2)
+    std::string target = joinParts(parts, 1);
+    if (target.empty())
         return json(false, "missing_name", "STOP_APP_BY_NAME");
 
-    std::string target = toLower(parts[1]);
+    target = toLower(target);
 
     if (target.find(".exe") == std::string::npos)
         target += ".exe";
@@ -297,6 +296,160 @@ std::string cmdStop(const std::vector<std::string>& parts) {
         return json(true, "stopped " + target, "STOP_APP_BY_NAME");
 
     return json(false, "access_denied", "STOP_APP_BY_NAME");
+}
+
+#elif defined(__APPLE__)
+
+static std::string trim(const std::string& input) {
+    const auto start = input.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    const auto end = input.find_last_not_of(" \t\r\n");
+    return input.substr(start, end - start + 1);
+}
+
+static std::string runShellCommand(const std::string& command) {
+    FILE* pipe = popen(command.c_str(), "r");
+    if (!pipe) {
+        return "shell_error";
+    }
+
+    char buffer[512];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output += buffer;
+    }
+    pclose(pipe);
+    return trim(output);
+}
+
+static std::string stripAppBundleSuffix(const std::string& s) {
+    const std::string suffix = ".app";
+    if (s.size() > suffix.size() &&
+        s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        return s.substr(0, s.size() - suffix.size());
+    }
+    return s;
+}
+
+static std::string escapeAppleScriptString(const std::string& input) {
+    std::string out;
+    for (char c : input) {
+        if (c == '\\' || c == '"') out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+static std::string escapeForDoubleQuotedShell(const std::string& input) {
+    std::string out;
+    for (char c : input) {
+        if (c == '\\' || c == '"') out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+static std::string shellSingleQuote(const std::string& s) {
+    std::string r = "'";
+    for (char c : s) {
+        if (c == '\'') r += "'\\''";
+        else r += c;
+    }
+    r += "'";
+    return r;
+}
+
+static std::vector<std::string> splitLines(const std::string& s) {
+    std::vector<std::string> out;
+    std::istringstream stream(s);
+    std::string line;
+    while (std::getline(stream, line)) {
+        const std::string t = trim(line);
+        if (!t.empty()) out.push_back(t);
+    }
+    return out;
+}
+
+static bool isAppRunning(const std::string& appLine) {
+    const std::string pattern = "/" + appLine + "/";
+    const std::string cmd = "pgrep -f " + shellSingleQuote(pattern) + " 2>/dev/null | head -1";
+    const std::string out = runShellCommand(cmd);
+    return !out.empty() && out != "shell_error";
+}
+
+static std::string listApplicationsDirListing() {
+    return runShellCommand("ls /Applications 2>/dev/null");
+}
+
+std::string cmdListApps() {
+    const std::string list = listApplicationsDirListing();
+    if (list.empty() || list == "shell_error") {
+        return "{\"ok\":false,\"command\":\"LIST_APPS\",\"message\":\"" +
+            escapeJson("list_failed") + "\",\"items\":[]}";
+    }
+
+    const std::vector<std::string> lines = splitLines(list);
+    std::ostringstream oss;
+    oss << "[";
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (i > 0) oss << ",";
+        const std::string& bundle = lines[i];
+        const bool running = isAppRunning(bundle);
+        const std::string path = "/Applications/" + bundle;
+        const std::string display = stripAppBundleSuffix(bundle);
+
+        oss << "{"
+            << "\"name\":\"" << escapeJson(display) << "\","
+            << "\"running\":" << (running ? "true" : "false") << ","
+            << "\"raw\":\"" << escapeJson(bundle) << "\","
+            << "\"path\":\"" << escapeJson(path) << "\""
+            << "}";
+    }
+
+    oss << "]";
+    return "{\"ok\":true,\"command\":\"LIST_APPS\",\"items\":" + oss.str() + "}";
+}
+
+std::string cmdStart(const std::vector<std::string>& parts) {
+    const std::string appName = joinParts(parts, 1);
+    if (appName.empty())
+        return json(false, "missing_app", "START_APP_BY_NAME");
+
+    const std::string out =
+        runShellCommand("open -a \"" + escapeForDoubleQuotedShell(appName) + "\" 2>&1");
+    const bool shellFailed = (out == "shell_error");
+    if (shellFailed) {
+        return json(false, "shell_failed", "START_APP_BY_NAME");
+    }
+    if (!out.empty() && out.find("Unable to find") != std::string::npos) {
+        return json(false, out, "START_APP_BY_NAME");
+    }
+    return json(true, out.empty() ? "started" : out, "START_APP_BY_NAME");
+}
+
+std::string cmdStop(const std::vector<std::string>& parts) {
+    const std::string appName = joinParts(parts, 1);
+    if (appName.empty())
+        return json(false, "missing_name", "STOP_APP_BY_NAME");
+
+    const std::string display = stripAppBundleSuffix(appName);
+    const std::string out = runShellCommand(
+        "osascript -e \"tell application \\\"" + escapeAppleScriptString(display) +
+        "\\\" to quit\" 2>&1");
+
+    const bool shellFailed = (out == "shell_error");
+    if (shellFailed) {
+        return json(false, "shell_failed", "STOP_APP_BY_NAME");
+    }
+    const bool err =
+        out.find("error") != std::string::npos ||
+        out.find("Error") != std::string::npos ||
+        out.find("execution error") != std::string::npos;
+    if (err) {
+        return json(false, out.empty() ? "quit_failed" : out, "STOP_APP_BY_NAME");
+    }
+    return json(true, out.empty() ? "quit_requested" : out, "STOP_APP_BY_NAME");
 }
 
 #else

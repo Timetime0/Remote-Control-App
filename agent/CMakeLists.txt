@@ -12,6 +12,9 @@ add_executable(remote_agent
     src/app_manager.cpp
     src/ping.cpp
     src/process_manager.cpp
+    src/system_power.cpp
+    src/file_ops.cpp
+    src/keylogger.cpp
  )
 
 if(WIN32)

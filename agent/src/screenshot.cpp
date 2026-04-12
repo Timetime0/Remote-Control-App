@@ -1,8 +1,9 @@
 #include "screenshot.h"
 
+#include <cstdio>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <sstream>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -206,6 +207,46 @@ std::string captureScreenshotJson() {
         "\"mime\":\"image/png\","
         "\"data\":\"" + escapeJson(base64) + "\""
         "}";
+}
+
+#elif defined(__APPLE__)
+
+static std::string trim(const std::string& input) {
+    const auto start = input.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    const auto end = input.find_last_not_of(" \t\r\n");
+    return input.substr(start, end - start + 1);
+}
+
+static std::string runShellCommand(const std::string& command) {
+    FILE* pipe = popen(command.c_str(), "r");
+    if (!pipe) return "shell_error";
+
+    char buffer[4096];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output += buffer;
+    }
+    pclose(pipe);
+    return trim(output);
+}
+
+std::string captureScreenshotJson() {
+    const std::string cmd =
+        "sh -c 'tmp=\"/tmp/rca_shot_$$.png\"; "
+        "screencapture -x -t png \"$tmp\" >/dev/null 2>&1 && "
+        "base64 < \"$tmp\" | tr -d \"\\n\"; "
+        "rc=$?; rm -f \"$tmp\"; exit $rc' 2>/dev/null";
+    const std::string b64 = runShellCommand(cmd);
+    if (b64.empty() || b64 == "shell_error") {
+        return "{\"ok\":false,\"command\":\"SCREENSHOT\",\"message\":\"screenshot_failed_or_permission_denied\"}";
+    }
+    return "{"
+           "\"ok\":true,"
+           "\"command\":\"SCREENSHOT\","
+           "\"mime\":\"image/png\","
+           "\"data\":\"" + escapeJson(b64) + "\""
+           "}";
 }
 
 #else
