@@ -19,3 +19,20 @@ remote_agent_test
 # OS/editor files
 .DS_Store
 *.swp
+
+# Visual Studio
+.vs/
+.vscode/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+Debug/
+Release/
+x64/
+x86/
+out/
+bin/
+obj/
