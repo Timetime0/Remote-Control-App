@@ -92,7 +92,7 @@ function AppListModal({ open, session, onClose, onRefresh, onRunLine, onLog }: A
         className="process-start-input"
         onChange={(e) => setQueryText(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && void handleStartByQuery()}
-        placeholder="Filter / Start by name (Enter để start)"
+        placeholder="Filter / Start by name (Press ENTER to start)"
         type="text"
         value={queryText}
       />

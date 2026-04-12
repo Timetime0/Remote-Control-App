@@ -113,7 +113,7 @@ function ProcessListModal({
         className="process-start-input"
         onChange={(e) => setQueryText(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && void handleStart()}
-        placeholder="Filter / Start by name (Enter để start)"
+        placeholder="Filter / Start by name (Press ENTER to start)"
         type="text"
         value={queryText}
       />

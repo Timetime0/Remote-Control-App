@@ -447,3 +447,7 @@ body {
   background: #27863a;
   border-color: #27863a;
 }
+
+.screenshot-link-btn {
+  text-decoration: underline;
+}
