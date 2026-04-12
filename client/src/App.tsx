@@ -12,6 +12,8 @@ import type { AppListSession, CommandResult, ProcessListSession } from './types'
 import { AddPcInput, RemoteCommand, RemotePc } from './types';
 import { buildAppListSession } from './utils/parseListApps';
 import { buildProcessListSession } from './utils/parseListProcesses';
+import MouseControlModal from './components/MouseControlModal';
+import ScreenViewerModal from './components/ScreenViewerModal';
 
 function App() {
   const [pcs, setPcs] = useState<RemotePc[]>([]);
@@ -41,6 +43,9 @@ function App() {
   const [keyloggerBusy, setKeyloggerBusy] = useState(false);
   const [webcamOpen, setWebcamOpen] = useState(false);
   const [webcamBusy, setWebcamBusy] = useState(false);
+  const [mouseControlOpen, setMouseControlOpen] = useState(false);
+  const [screenViewerOpen, setScreenViewerOpen] = useState(false);
+  const [screenViewerImage, setScreenViewerImage] = useState('');
   const [screenshotSession, setScreenshotSession] = useState<{
     target: RemotePc;
     imageUrl: string;
@@ -120,6 +125,23 @@ function App() {
     return () => clearInterval(timer);
   }, [keyloggerOpen, refreshKeyloggerLog]);
 
+  useEffect(() => {
+    const unsubscribe = window.remoteApi.onScreenViewerFrame((payload) => {
+      if (
+        payload.ok === true &&
+        payload.command === 'SCREEN_VIEWER_FRAME' &&
+        typeof payload.mime === 'string' &&
+        typeof payload.data === 'string'
+      ) {
+        setScreenViewerImage(`data:${payload.mime};base64,${payload.data}`);
+      }
+    });
+  
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   const runCommand = async (command: RemoteCommand) => {
     if (!selectedPc) {
       appendLog('No PC selected.');
@@ -134,10 +156,30 @@ function App() {
         return;
       }
     }
+
     console.log('command', command);
     const target = resolvePc(selectedPc);
     appendLog(`Run ${command} on ${target.name}`);
     const result = await window.remoteApi.runCommand(target.id, command);
+
+    try {
+      const parsed = JSON.parse(result.raw);
+    
+      if (
+        parsed.ok === true &&
+        parsed.command === 'SCREENSHOT' &&
+        typeof parsed.mime === 'string' &&
+        typeof parsed.data === 'string'
+      ) {
+        const imageUrl = `data:${parsed.mime};base64,${parsed.data}`;
+    
+        if (screenViewerOpen) {
+          setScreenViewerImage(imageUrl);
+        }
+      }
+    } catch {
+      // ignore
+    }
 
     if (command === 'LIST_PROCESSES' && result.ok && result.raw) {
       const session = buildProcessListSession(target, result.raw);
@@ -467,6 +509,25 @@ function App() {
             : ''
         }
       />
+
+      <ScreenViewerModal
+        imageUrl={screenViewerImage}
+        onClose={() => {
+          if (selectedPc) {
+            void window.remoteApi.startScreenViewer(selectedPc.id);
+          }
+
+          setScreenViewerOpen(false);
+          setScreenViewerImage('');
+        }}
+        open={screenViewerOpen}
+        targetLabel={
+          selectedPc
+            ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})`
+            : 'No target'
+        }
+      />
+
       <KeyloggerModal
         busy={keyloggerBusy}
         content={keyloggerContent}
@@ -520,6 +581,39 @@ function App() {
           selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
         }
       />
+
+      <MouseControlModal
+        busy={false}
+        onClose={() => setMouseControlOpen(false)}
+        onLeftClick={(x, y) => {
+          if (!selectedPc) return;
+          void window.remoteApi.runAgentLine(
+            selectedPc.id,
+            `MOUSE_LEFT_CLICK ${x} ${y}`,
+          );
+        }}
+        onMove={(x, y) => {
+          if (!selectedPc) return;
+          void window.remoteApi.runAgentLine(
+            selectedPc.id,
+            `MOUSE_MOVE ${x} ${y}`,
+          );
+        }}
+        onRightClick={(x, y) => {
+          if (!selectedPc) return;
+          void window.remoteApi.runAgentLine(
+            selectedPc.id,
+            `MOUSE_RIGHT_CLICK ${x} ${y}`,
+          );
+        }}
+        open={mouseControlOpen}
+        targetLabel={
+          selectedPc
+            ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})`
+            : 'No target'
+        }
+      /> 
+
       <header className="topbar">
         <div>
           <h1>Remote Control Application</h1>
@@ -611,6 +705,16 @@ function App() {
   disabled={!selectedPc}
   onClearLogs={() => setLogs([])}
   onOpenFileTransfer={() => setFileTransferOpen(true)}
+  onOpenMouseControl={() => setMouseControlOpen(true)}
+
+  onOpenScreenViewer={() => {
+    setScreenViewerOpen(true);
+  
+    if (selectedPc) {
+      void window.remoteApi.startScreenViewer(selectedPc.id);
+    }
+  }}
+
   onRun={(command) => {
     if (command === 'KEYLOGGER_START') {
       void handleOpenKeylogger();

@@ -8,6 +8,19 @@ declare global {
       removePc: (pcId: string) => Promise<RemotePc[]>;
       runCommand: (pcId: string, command: RemoteCommand) => Promise<CommandResult>;
       runAgentLine: (pcId: string, line: string) => Promise<CommandResult>;
+
+      startScreenViewer: (pcId: string) => Promise<{ ok: boolean; message?: string }>;
+stopScreenViewer: (pcId: string) => Promise<{ ok: boolean; message?: string }>;
+
+      onScreenViewerFrame: (
+        callback: (payload: {
+          ok: boolean;
+          command: string;
+          mime: string;
+          data: string;
+        }) => void,
+      ) => () => void;
+
       uploadFile: (pcId: string, localPath: string, remotePath: string) => Promise<CommandResult>;
       downloadFile: (pcId: string, remotePath: string, localPath: string) => Promise<CommandResult>;
       pickLocalFile: () => Promise<string | null>;
