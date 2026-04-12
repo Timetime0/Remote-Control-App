@@ -12,7 +12,7 @@ add_executable(remote_agent
     src/app_manager.cpp
     src/ping.cpp
     src/process_manager.cpp
-)
+ )
 
 if(WIN32)
   target_link_libraries(remote_agent ws2_32)
