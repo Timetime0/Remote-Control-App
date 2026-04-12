@@ -1,5 +1,6 @@
 #include "commands.h"
 
+#include <cstdlib>
 #include <iostream>
 #include <thread>
 #include <array>
@@ -86,10 +87,20 @@ void shutdownSock() {
 }
 
 // ===== MAIN =====
-int main() {
+int main(int argc, char** argv) {
     if (!init()) {
         std::cerr << "Socket init failed\n";
         return 1;
+    }
+
+    int port = 5050;
+    if (argc >= 2) {
+        const int p = std::atoi(argv[1]);
+        if (p > 0 && p <= 65535) {
+            port = p;
+        } else {
+            std::cerr << "Invalid port, using 5050\n";
+        }
     }
 
     SocketType server = socket(AF_INET, SOCK_STREAM, 0);
@@ -108,7 +119,7 @@ int main() {
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(5050);
+    addr.sin_port = htons(static_cast<unsigned short>(port));
     addr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(server, (sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -121,7 +132,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "Server running on port 5050...\n";
+    std::cout << "Server running on port " << port << "...\n";
 
     while (true) {
         sockaddr_in client{};
