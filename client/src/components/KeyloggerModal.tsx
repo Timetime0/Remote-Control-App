@@ -38,7 +38,7 @@ function KeyloggerModal({
             </p>
           </div>
           <button className="btn modal-close" onClick={onClose} type="button">
-            Đóng
+            Close
           </button>
         </div>
         <div className="process-modal-toolbar">

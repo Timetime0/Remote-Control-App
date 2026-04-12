@@ -3,46 +3,66 @@ import { RemoteCommand } from '../types';
 type FeaturePanelProps = {
   disabled: boolean;
   onRun: (command: RemoteCommand) => void;
-  onOpenKeylogger: () => void;
-  onOpenWebcam: () => void;
+  onClearLogs: () => void;
   onOpenFileTransfer: () => void;
 };
 
 const COMMANDS: Array<{ label: string; command: RemoteCommand }> = [
-  { label: 'Ping Agent', command: 'PING' },
-  { label: 'List Processes', command: 'LIST_PROCESSES' },
   { label: 'List Applications', command: 'LIST_APPS' },
+  { label: 'List Processes', command: 'LIST_PROCESSES' },
+  { label: 'Webcam', command: 'WEBCAM_START' },
   { label: 'Screenshot', command: 'SCREENSHOT' },
-  { label: 'Shutdown', command: 'SHUTDOWN' },
-  { label: 'Restart', command: 'RESTART' },
+  { label: 'Keylogger', command: 'KEYLOGGER_START' },
 ];
 
 function FeaturePanel({
   disabled,
   onRun,
-  onOpenKeylogger,
-  onOpenWebcam,
+  onClearLogs,
   onOpenFileTransfer,
 }: FeaturePanelProps) {
   return (
     <article className="panel">
-      <h2>Chức năng điều khiển từ xa</h2>
+      <h2>Remote Control Functions</h2>
+
       <div className="feature-shortcuts">
-        <button className="btn primary" disabled={disabled} onClick={onOpenKeylogger} type="button">
-          Keylogger
-        </button>
-        <button className="btn primary" disabled={disabled} onClick={onOpenWebcam} type="button">
-          Webcam
-        </button>
         <button
           className="btn primary"
           disabled={disabled}
-          onClick={onOpenFileTransfer}
+          onClick={() => onRun('PING')}
           type="button"
         >
-          File
+          Ping
+        </button>
+
+        <button
+          className="btn btn-clean"
+          onClick={onClearLogs}
+          type="button"
+        >
+          Clean
+        </button>
+
+        <button
+          className="btn btn-warning"
+          disabled={disabled}
+          onClick={() => onRun('RESTART')}
+          type="button"
+        >
+          Restart
+        </button>
+
+        <button
+          className="btn btn-shutdown"
+          disabled={disabled}
+          onClick={() => onRun('SHUTDOWN')}
+          type="button"
+        >
+          Shutdown
         </button>
       </div>
+
+
       <div className="command-grid">
         {COMMANDS.map(({ label, command }) => (
           <button
@@ -55,6 +75,15 @@ function FeaturePanel({
             {label}
           </button>
         ))}
+
+          <button
+            className="btn"
+            disabled={disabled}
+            onClick={onOpenFileTransfer}
+            type="button"
+          >
+            File Transfer
+          </button>
       </div>
     </article>
   );

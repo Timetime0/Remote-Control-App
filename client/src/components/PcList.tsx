@@ -10,7 +10,7 @@ type PcListProps = {
 function PcList({ pcs, selectedId, onSelect, onRemove }: PcListProps) {
   return (
     <article className="panel">
-      <h2>Danh sách máy (multi-PC)</h2>
+      <h2>PC List (Multi-PC)</h2>
       <div className="pc-list">
         {pcs.map((pc) => {
           const isSelected = selectedId === pc.id;

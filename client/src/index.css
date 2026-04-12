@@ -414,3 +414,36 @@ body {
   border-radius: 8px;
   background: #020617;
 }
+
+.btn-warning {
+  background: #d9a441;
+  border: 1px solid #d9a441;
+  color: #fff;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #c28f2d;
+  border-color: #c28f2d;
+}
+
+.btn-shutdown {
+  background: #c93b3b;
+  border: 1px solid #c93b3b;
+  color: #fff;
+}
+
+.btn-shutdown:hover:not(:disabled) {
+  background: #b52f2f;
+  border-color: #b52f2f;
+}
+
+.btn-clean {
+  background: #2ea043;
+  border: 1px solid #2ea043;
+  color: #fff;
+}
+
+.btn-clean:hover:not(:disabled) {
+  background: #27863a;
+  border-color: #27863a;
+}

@@ -73,7 +73,7 @@ function FileTransferModal(props: FileTransferModalProps) {
             <p className="modal-sub">{props.targetLabel}</p>
           </div>
           <button className="btn modal-close" onClick={props.onClose} type="button">
-            Đóng
+            Close
           </button>
         </div>
         <div className="process-modal-toolbar">
