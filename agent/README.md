@@ -11,19 +11,28 @@ cmake -S . -B build
 cmake --build build
 ```
 
-Nếu chưa có `cmake`, có thể compile nhanh:
+Nếu chưa có `cmake`, biên dịch thủ công (macOS, ví dụ):
 
 ```bash
-c++ -std=c++17 src/main.cpp -o remote_agent
+c++ -std=c++17 -o remote_agent \
+  src/main.cpp src/commands.cpp src/screenshot.cpp src/app_manager.cpp \
+  src/ping.cpp src/process_manager.cpp src/system_power.cpp src/file_ops.cpp \
+  src/keylogger.cpp -Isrc -framework ApplicationServices
 ```
+
+(Windows: thêm `-lws2_32` và bỏ `-framework ApplicationServices`.)
 
 ## Run
 
+Tham số **cổng** (tùy chọn, mặc định `5050`):
+
 ```bash
+./build/remote_agent
 ./build/remote_agent 5050
+./build/remote_agent 5051
 ```
 
-Hoặc nếu dùng lệnh compile nhanh:
+Hoặc sau khi `c++` build ra `remote_agent` trong thư mục hiện tại:
 
 ```bash
 ./remote_agent 5050

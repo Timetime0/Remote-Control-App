@@ -41,6 +41,8 @@ type RemotePcConfig = Omit<RemotePc, 'status'>;
 
 let remotePcConfig: RemotePcConfig[] = [];
 
+const screenViewerSockets = new Map<string, net.Socket>();
+
 const withStatuses = async (): Promise<RemotePc[]> => {
   const statuses = await Promise.all(
     remotePcConfig.map(async (pc) => {
@@ -87,6 +89,68 @@ const sendAgentCommand = (
     });
     socket.on('error', (err) => done(err));
   });
+
+  function startScreenViewer(
+    pcId: string,
+    host: string,
+    port: number,
+    win: BrowserWindow,
+  ) {
+    if (screenViewerSockets.has(pcId)) {
+      return;
+    }
+  
+    const socket = new net.Socket();
+    let buffer = '';
+  
+    socket.connect(port, host, () => {
+      socket.write('SCREEN_VIEWER_START\n');
+    });
+  
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+    
+      let pos: number;
+      while ((pos = buffer.indexOf('\n<<END>>\n')) !== -1) {
+        const rawMessage = buffer.slice(0, pos).trim();
+        buffer = buffer.slice(pos + '\n<<END>>\n'.length);
+    
+        if (!rawMessage) continue;
+    
+        try {
+          const parsed = JSON.parse(rawMessage);
+    
+          win.webContents.send('agent:screen-viewer-frame', parsed);
+        } catch {
+          // ignore invalid json
+        }
+      }
+    });
+  
+    socket.on('close', () => {
+      screenViewerSockets.delete(pcId);
+    });
+  
+    socket.on('error', () => {
+      screenViewerSockets.delete(pcId);
+    });
+  
+    screenViewerSockets.set(pcId, socket);
+  }
+  
+  function stopScreenViewer(pcId: string) {
+    const socket = screenViewerSockets.get(pcId);
+    if (!socket) return;
+  
+    try {
+      socket.write('SCREEN_VIEWER_STOP\n');
+    } catch {
+      // ignore
+    }
+  
+    socket.destroy();
+    screenViewerSockets.delete(pcId);
+  }
 
 ipcMain.handle('agent:list-pcs', async (): Promise<RemotePc[]> => withStatuses());
 
@@ -258,6 +322,28 @@ ipcMain.handle('agent:list-files', async (_event, payload: { pcId: string; dir: 
   }
 });
 
+ipcMain.handle('agent:start-screen-viewer', async (_event, payload: { pcId: string }) => {
+  const target = remotePcConfig.find((pc) => pc.id === payload.pcId);
+
+  if (!target) {
+    return { ok: false, message: 'Unknown target PC' };
+  }
+
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) {
+    return { ok: false, message: 'Window not found' };
+  }
+
+  startScreenViewer(payload.pcId, target.host, target.port, win);
+
+  return { ok: true };
+});
+
+ipcMain.handle('agent:stop-screen-viewer', async (_event, payload: { pcId: string }) => {
+  stopScreenViewer(payload.pcId);
+  return { ok: true };
+});
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -267,6 +353,9 @@ app.on('ready', createWindow);
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+  screenViewerSockets.forEach((socket) => socket.destroy());
+  screenViewerSockets.clear();
+
   if (process.platform !== 'darwin') {
     app.quit();
   }
