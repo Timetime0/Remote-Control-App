@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-/** Đóng modal bằng phím Escape (chỉ khi open). */
+/** Tắt modal bằng phím Escape (chỉ khi open). */
 export function useModalEscape(open: boolean, onClose: () => void) {
   useEffect(() => {
     if (!open) return;

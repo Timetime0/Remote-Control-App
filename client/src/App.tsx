@@ -17,6 +17,9 @@ function App() {
   const [pcs, setPcs] = useState<RemotePc[]>([]);
   const [selectedPc, setSelectedPc] = useState<RemotePc | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const clearLogs = () => {
+    setLogs([]);
+  };
   const [form, setForm] = useState<AddPcInput>({
     name: '',
     host: '127.0.0.1',
@@ -140,7 +143,7 @@ function App() {
       const session = buildProcessListSession(target, result.raw);
       if (session) {
         setProcessSession(session);
-        appendLog(`OK LIST_PROCESSES: ${session.rows.length} row(s) — xem popup`);
+        appendLog(`OK LIST_PROCESSES: ${session.rows.length} row(s) — check popup`);
       } else {
         appendLog(`OK LIST_PROCESSES: không parse được JSON | ${result.raw}`);
       }
@@ -148,7 +151,7 @@ function App() {
       const session = buildAppListSession(target, result.raw);
       if (session) {
         setAppSession(session);
-        appendLog(`OK LIST_APPS: ${session.rows.length} row(s) — xem popup`);
+        appendLog(`OK LIST_APPS: ${session.rows.length} row(s) — check popup`);
       } else {
         appendLog(`OK LIST_APPS: không parse được JSON | ${result.raw}`);
       }
@@ -519,8 +522,8 @@ function App() {
       />
       <header className="topbar">
         <div>
-          <h1>Remote Control Client</h1>
-          <p>Điều khiển đồng thời nhiều PC từ một dashboard trung tâm.</p>
+          <h1>Remote Control Application</h1>
+          <p>Manage and control multiple PCs simultaneously from a centralized dashboard.</p>
         </div>
       </header>
 
@@ -605,13 +608,24 @@ function App() {
           selectedId={selectedPc?.id ?? null}
         />
         <FeaturePanel
-          disabled={!selectedPc}
-          onOpenFileTransfer={() => setFileTransferOpen(true)}
-          onOpenKeylogger={() => void handleOpenKeylogger()}
-          onOpenWebcam={() => setWebcamOpen(true)}
-          onRun={(command) => void runCommand(command)}
-        />
-        <SessionConsole logs={logs} />
+  disabled={!selectedPc}
+  onClearLogs={() => setLogs([])}
+  onOpenFileTransfer={() => setFileTransferOpen(true)}
+  onRun={(command) => {
+    if (command === 'KEYLOGGER_START') {
+      void handleOpenKeylogger();
+      return;
+    }
+
+    if (command === 'WEBCAM_START') {
+      setWebcamOpen(true);
+      return;
+    }
+
+    void runCommand(command);
+  }}
+/>
+<SessionConsole logs={logs} />
       </section>
     </main>
   );

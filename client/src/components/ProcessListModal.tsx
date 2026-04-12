@@ -60,8 +60,20 @@ function ProcessListModal({
       onLog('Kill: chọn một dòng process (PID) trước.');
       return;
     }
+  
+    const selectedRow = rows.find((r) => r.pid === selectedPid);
+  
+    const confirmed = window.confirm(
+      `Do you want to kill "${selectedRow?.comm ?? 'Unknown'}" (PID: ${selectedPid})?\n\nThis action will close the process immediately. Unsaved data may be lost.`
+    );
+  
+    if (!confirmed) {
+      onLog(`Cancelled kill PID ${selectedPid}`);
+      return;
+    }
+  
     setBusy(true);
-
+  
     try {
       const line = `KILL_PROCESS ${selectedPid}`;
       const result = await onRunLine(target, line);
@@ -101,7 +113,7 @@ function ProcessListModal({
         className="process-start-input"
         onChange={(e) => setQueryText(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && void handleStart()}
-        placeholder="Filter / Start by name (Enter để start)"
+        placeholder="Filter / Start by name (Press ENTER to start)"
         type="text"
         value={queryText}
       />
@@ -133,7 +145,7 @@ function ProcessListModal({
         <thead>
           <tr>
             <th>PID</th>
-            <th>Command / name</th>
+            <th>Background process</th>
           </tr>
         </thead>
         <tbody>
