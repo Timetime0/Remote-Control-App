@@ -15,6 +15,10 @@ type KeyloggerModalProps = {
   onClear: () => void;
 };
 
+function formatNow() {
+  return new Date().toLocaleTimeString('vi-VN', { hour12: false });
+}
+
 function KeyloggerModal({
   open,
   pcId,
@@ -30,6 +34,7 @@ function KeyloggerModal({
 }: KeyloggerModalProps) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const [inputValue, setInputValue] = useState('');
+  const [localLog, setLocalLog] = useState('');
 
   useModalEscape(open, onClose);
 
@@ -37,53 +42,37 @@ function KeyloggerModal({
 
   const handleStart = () => {
     setInputValue('');
+    setLocalLog(`[${formatNow()}] START\n`);
     onStart();
     setTimeout(() => {
       inputRef.current?.focus();
     }, 50);
   };
 
+  const handleStop = () => {
+    setLocalLog((prev) => `${prev}\n[${formatNow()}] STOP\n`);
+    onStop();
+  };
+
   const handleClear = () => {
     setInputValue('');
+    setLocalLog('');
     onClear();
     setTimeout(() => {
       inputRef.current?.focus();
     }, 50);
   };
 
-  const handleInputChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
+    setInputValue(newValue);
 
-    if (!pcId || !running) {
-      setInputValue(newValue);
-      return;
-    }
+    if (!running) return;
 
-    try {
-      if (newValue.length > inputValue.length) {
-        const addedText = newValue.slice(inputValue.length);
-
-        for (const ch of addedText) {
-          let key = ch;
-
-          if (ch === '\n') key = '[Enter]';
-          else if (ch === ' ') key = '[Space]';
-
-          await window.remoteApi.runCommand(pcId, `KEYLOGGER_ADD ${key}`);
-        }
-      } else if (newValue.length < inputValue.length) {
-        const removedCount = inputValue.length - newValue.length;
-
-        for (let i = 0; i < removedCount; i += 1) {
-          await window.remoteApi.runCommand(pcId, 'KEYLOGGER_ADD [Backspace]');
-        }
-      }
-
-      setInputValue(newValue);
-    } catch (error) {
-      console.error('KEYLOGGER_ADD failed', error);
-    }
+    setLocalLog(newValue);
   };
+
+  const displayContent = running || localLog ? localLog : content;
 
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
@@ -96,7 +85,7 @@ function KeyloggerModal({
       >
         <div className="modal-header">
           <div>
-            <h2 id="keylogger-title">Keylogger</h2>
+            <h2 id="keylogger-title">Input Test</h2>
             <p className="modal-sub">
               {targetLabel} · status {running ? 'Running' : 'Stopped'}
             </p>
@@ -120,7 +109,7 @@ function KeyloggerModal({
           <button
             className="btn btn-danger"
             disabled={busy || !running}
-            onClick={onStop}
+            onClick={handleStop}
             type="button"
           >
             Stop
@@ -152,7 +141,7 @@ function KeyloggerModal({
 
           <textarea
             ref={inputRef}
-            placeholder="Gõ vào đây để test keylogger..."
+            placeholder="Gõ vào đây để test nhập liệu..."
             value={inputValue}
             onChange={handleInputChange}
             style={{
@@ -172,7 +161,7 @@ function KeyloggerModal({
 
         <div className="process-table-wrap">
           <p className="modal-sub keylogger-log-hint">
-            Chỉ ghi phím trong ô test của app khi đang bật.
+            Chỉ test nhập liệu cục bộ trong app, không gửi phím sang agent.
           </p>
 
           <pre
@@ -182,7 +171,7 @@ function KeyloggerModal({
               wordBreak: 'break-word',
             }}
           >
-            {content || '(empty log)'}
+            {displayContent || '(empty log)'}
           </pre>
         </div>
       </div>
