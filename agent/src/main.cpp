@@ -1,4 +1,5 @@
 #include "commands.h"
+#include "screen_viewer.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -61,7 +62,7 @@ void handle(SocketType client) {
             std::string line = data.substr(0, pos);
             data.erase(0, pos + 1);
 
-            std::string res = process(line) + "\n<<END>>\n";
+            std::string res = process(line, client) + "\n<<END>>\n";
             sendAll(client, res);
         }
     }
