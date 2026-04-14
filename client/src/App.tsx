@@ -510,11 +510,11 @@ function App() {
         }
       />
 
-      <ScreenViewerModal
+        <ScreenViewerModal
         imageUrl={screenViewerImage}
         onClose={() => {
           if (selectedPc) {
-            void window.remoteApi.startScreenViewer(selectedPc.id);
+            void window.remoteApi.stopScreenViewer(selectedPc.id);
           }
 
           setScreenViewerOpen(false);
@@ -584,26 +584,36 @@ function App() {
 
       <MouseControlModal
         busy={false}
-        onClose={() => setMouseControlOpen(false)}
-        onLeftClick={(x, y) => {
+        imageUrl={screenViewerImage}
+        onClose={() => {
+          if (selectedPc) {
+            void window.remoteApi.stopScreenViewer(selectedPc.id);
+          }
+
+          setMouseControlOpen(false);
+        }}
+        onMouseMove={(payload) => {
           if (!selectedPc) return;
+
           void window.remoteApi.runAgentLine(
             selectedPc.id,
-            `MOUSE_LEFT_CLICK ${x} ${y}`,
+            `MOUSE_MOVE ${payload.x} ${payload.y} ${payload.viewerWidth} ${payload.viewerHeight} ${payload.remoteWidth} ${payload.remoteHeight}`,
           );
         }}
-        onMove={(x, y) => {
+        onLeftClick={(payload) => {
           if (!selectedPc) return;
+
           void window.remoteApi.runAgentLine(
             selectedPc.id,
-            `MOUSE_MOVE ${x} ${y}`,
+            `MOUSE_LEFT_CLICK ${payload.x} ${payload.y} ${payload.viewerWidth} ${payload.viewerHeight} ${payload.remoteWidth} ${payload.remoteHeight}`,
           );
         }}
-        onRightClick={(x, y) => {
+        onRightClick={(payload) => {
           if (!selectedPc) return;
+
           void window.remoteApi.runAgentLine(
             selectedPc.id,
-            `MOUSE_RIGHT_CLICK ${x} ${y}`,
+            `MOUSE_RIGHT_CLICK ${payload.x} ${payload.y} ${payload.viewerWidth} ${payload.viewerHeight} ${payload.remoteWidth} ${payload.remoteHeight}`,
           );
         }}
         open={mouseControlOpen}
@@ -612,7 +622,7 @@ function App() {
             ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})`
             : 'No target'
         }
-      /> 
+      />
 
       <header className="topbar">
         <div>
@@ -705,13 +715,23 @@ function App() {
   disabled={!selectedPc}
   onClearLogs={() => setLogs([])}
   onOpenFileTransfer={() => setFileTransferOpen(true)}
-  onOpenMouseControl={() => setMouseControlOpen(true)}
+  onOpenMouseControl={() => {
+    setMouseControlOpen(true);
+  
+    if (selectedPc) {
+      appendLog(`Run MOUSE_CONTROL on ${selectedPc.host}:${selectedPc.port}`);
+      void window.remoteApi.startScreenViewer(selectedPc.id);
+      appendLog(`OK MOUSE_CONTROL: ${selectedPc.name}`);
+    }
+  }}
 
   onOpenScreenViewer={() => {
     setScreenViewerOpen(true);
   
     if (selectedPc) {
+      appendLog(`Run SCREEN_VIEWER on ${selectedPc.host}:${selectedPc.port}`);
       void window.remoteApi.startScreenViewer(selectedPc.id);
+      appendLog(`OK SCREEN_VIEWER: ${selectedPc.name}`);
     }
   }}
 
