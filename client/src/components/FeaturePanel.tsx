@@ -5,6 +5,8 @@ type FeaturePanelProps = {
   onRun: (command: RemoteCommand) => void;
   onClearLogs: () => void;
   onOpenFileTransfer: () => void;
+  onOpenMouseControl: () => void;
+  onOpenScreenViewer: () => void;
 };
 
 const COMMANDS: Array<{ label: string; command: RemoteCommand }> = [
@@ -20,6 +22,8 @@ function FeaturePanel({
   onRun,
   onClearLogs,
   onOpenFileTransfer,
+  onOpenMouseControl,
+  onOpenScreenViewer,
 }: FeaturePanelProps) {
   return (
     <article className="panel">
@@ -83,6 +87,24 @@ function FeaturePanel({
             type="button"
           >
             File Transfer
+          </button>
+
+          <button
+            className="btn"
+            disabled={disabled}
+            onClick={onOpenMouseControl}
+            type="button"
+          >
+            Mouse Control
+          </button>
+
+          <button
+            className="btn"
+            disabled={disabled}
+            onClick={onOpenScreenViewer}
+            type="button"
+          >
+            Screen Viewer
           </button>
       </div>
     </article>

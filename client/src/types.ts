@@ -19,7 +19,12 @@ export type RemoteCommand =
   | 'RESTART'
   | 'WEBCAM_START'
   | 'WEBCAM_RECORD_START'
-  | 'WEBCAM_RECORD_STOP';
+  | 'WEBCAM_RECORD_STOP'
+  | 'MOUSE_MOVE'
+  | 'MOUSE_LEFT_CLICK'
+  | 'MOUSE_RIGHT_CLICK'
+  | 'SCREEN_VIEWER_START'
+  | 'SCREEN_VIEWER_STOP';
 
 export type CommandResult = {
   ok: boolean;
