@@ -472,3 +472,52 @@ body {
   object-fit: contain;
   border-radius: 12px;
 }
+
+.mouse-viewer-modal {
+  width: min(90vw, 1100px);
+  height: min(85vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+
+.mouse-viewer-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f1115;
+  border-radius: 12px;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.mouse-viewer-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.mouse-viewer-empty {
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.mouse-viewer-image-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.mouse-viewer-cursor {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ef4444;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.25);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.55);
+}

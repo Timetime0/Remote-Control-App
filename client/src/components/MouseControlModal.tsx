@@ -1,38 +1,76 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useModalEscape } from '../hooks/useModalEscape';
+
+type MousePayload = {
+  x: number;
+  y: number;
+  viewerWidth: number;
+  viewerHeight: number;
+  remoteWidth: number;
+  remoteHeight: number;
+};
 
 type MouseControlModalProps = {
   open: boolean;
   busy: boolean;
+  imageUrl: string;
   targetLabel: string;
   onClose: () => void;
-  onMove: (x: number, y: number) => void;
-  onLeftClick: (x: number, y: number) => void;
-  onRightClick: (x: number, y: number) => void;
+  onMouseMove: (payload: MousePayload) => void;
+  onLeftClick: (payload: MousePayload) => void;
+  onRightClick: (payload: MousePayload) => void;
 };
 
 function MouseControlModal({
   open,
   busy,
+  imageUrl,
   targetLabel,
   onClose,
-  onMove,
+  onMouseMove,
   onLeftClick,
   onRightClick,
 }: MouseControlModalProps) {
-  useModalEscape(open, onClose);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const lastMoveRef = useRef(0);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
 
-  const [x, setX] = useState('500');
-  const [y, setY] = useState('300');
+  useModalEscape(open, onClose);
 
   if (!open) return null;
 
-  const px = Number(x);
-  const py = Number(y);
+  const buildPayload = (
+    event: React.MouseEvent<HTMLImageElement>,
+  ): MousePayload | null => {
+    const image = imageRef.current;
+    if (!image) return null;
+
+    const rect = image.getBoundingClientRect();
+
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+      return null;
+    }
+
+    return {
+      x: Math.round(x),
+      y: Math.round(y),
+      viewerWidth: Math.round(rect.width),
+      viewerHeight: Math.round(rect.height),
+      remoteWidth: 1920,
+      remoteHeight: 1080,
+    };
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
-      <div className="modal-panel process-modal" onClick={(e) => e.stopPropagation()} role="dialog">
+      <div
+        className="modal-panel mouse-viewer-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+      >
         <div className="modal-header">
           <div>
             <h2>Mouse Control</h2>
@@ -44,49 +82,66 @@ function MouseControlModal({
           </button>
         </div>
 
-        <div className="process-modal-toolbar">
-          <input
-            className="process-start-input"
-            onChange={(e) => setX(e.target.value)}
-            placeholder="X"
-            type="number"
-            value={x}
-          />
+        <div className="mouse-viewer-body">
+        {imageUrl ? (
+  <div className="mouse-viewer-image-wrap">
+                <img
+                ref={imageRef}
+                alt="Mouse control preview"
+                className="mouse-viewer-image"
+                draggable={false}
+                src={imageUrl}
+                onClick={(e) => {
+                  const payload = buildPayload(e);
+                  if (payload) {
+                    onLeftClick(payload);
+                  }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
 
-          <input
-            className="process-start-input"
-            onChange={(e) => setY(e.target.value)}
-            placeholder="Y"
-            type="number"
-            value={y}
-          />
+                  const payload = buildPayload(e);
+                  if (payload) {
+                    onRightClick(payload);
+                  }
+                }}
+                onMouseMove={(e) => {
+                  const now = Date.now();
 
-          <button
-            className="btn"
-            disabled={busy}
-            onClick={() => onMove(px, py)}
-            type="button"
-          >
-            Move
-          </button>
+                  if (now - lastMoveRef.current < 30) {
+                    return;
+                  }
 
-          <button
-            className="btn primary"
-            disabled={busy}
-            onClick={() => onLeftClick(px, py)}
-            type="button"
-          >
-            Left Click
-          </button>
+                  lastMoveRef.current = now;
 
-          <button
-            className="btn btn-danger"
-            disabled={busy}
-            onClick={() => onRightClick(px, py)}
-            type="button"
-          >
-            Right Click
-          </button>
+                  const payload = buildPayload(e);
+
+                  if (payload) {
+                    setCursor({
+                      x: payload.x,
+                      y: payload.y,
+                    });
+
+                    onMouseMove(payload);
+                  }
+                }}
+              />
+
+              {cursor && (
+                <div
+                  className="mouse-viewer-cursor"
+                  style={{
+                    left: cursor.x,
+                    top: cursor.y,
+                  }}
+                />
+              )}
+            </div>
+          ) : (
+            <div className="mouse-viewer-empty">
+              Waiting for screen preview...
+            </div>
+          )}
         </div>
       </div>
     </div>
