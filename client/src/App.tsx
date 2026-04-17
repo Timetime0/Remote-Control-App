@@ -19,9 +19,6 @@ function App() {
   const [pcs, setPcs] = useState<RemotePc[]>([]);
   const [selectedPc, setSelectedPc] = useState<RemotePc | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const clearLogs = () => {
-    setLogs([]);
-  };
   const [form, setForm] = useState<AddPcInput>({
     name: '',
     host: '127.0.0.1',
@@ -40,9 +37,9 @@ function App() {
   const [keyloggerOpen, setKeyloggerOpen] = useState(false);
   const [keyloggerRunning, setKeyloggerRunning] = useState(false);
   const [keyloggerContent, setKeyloggerContent] = useState('');
-  const [keyloggerBusy, setKeyloggerBusy] = useState(false);
+  const keyloggerBusy = false;
   const [webcamOpen, setWebcamOpen] = useState(false);
-  const [webcamBusy, setWebcamBusy] = useState(false);
+  const webcamBusy = false;
   const [mouseControlOpen, setMouseControlOpen] = useState(false);
   const [screenViewerOpen, setScreenViewerOpen] = useState(false);
   const [screenViewerImage, setScreenViewerImage] = useState('');
@@ -101,20 +98,8 @@ function App() {
   const resolvePc = useCallback((pc: RemotePc) => pcs.find((p) => p.id === pc.id) ?? pc, [pcs]);
 
   const refreshKeyloggerLog = useCallback(async () => {
-    if (!selectedPc) return;
-    const target = resolvePc(selectedPc);
-    const result = await window.remoteApi.runCommand(target.id, 'KEYLOGGER_GET_LOG');
-    if (!result.raw) return;
-    try {
-      const parsed = JSON.parse(result.raw) as { ok?: boolean; output?: string; running?: boolean };
-      if (parsed.ok) {
-        if (typeof parsed.output === 'string') setKeyloggerContent(parsed.output);
-        if (typeof parsed.running === 'boolean') setKeyloggerRunning(parsed.running);
-      }
-    } catch {
-      // ignore parse errors
-    }
-  }, [resolvePc, selectedPc]);
+        // Input Test chạy cục bộ, không cần gọi agent.
+    }, []);
 
   useEffect(() => {
     if (!keyloggerOpen) return;
@@ -249,49 +234,16 @@ function App() {
     await refreshKeyloggerLog();
   };
 
-  const handleStartKeylogger = async () => {
-    if (!selectedPc) return;
-    setKeyloggerBusy(true);
-    try {
-      const target = resolvePc(selectedPc);
-      const result = await window.remoteApi.runCommand(target.id, 'KEYLOGGER_START');
-      appendLog(`${result.ok ? 'OK' : 'FAIL'} KEYLOGGER_START: ${result.message}`);
-      if (result.ok) setKeyloggerRunning(true);
-      await refreshKeyloggerLog();
-    } finally {
-      setKeyloggerBusy(false);
-    }
-  };
+    const handleStartKeylogger = async () => {
+        setKeyloggerRunning(true);
+        setKeyloggerContent('');
+        appendLog('Input Test started.');
+    };
 
-  const handleStopKeylogger = async () => {
-    if (!selectedPc) return;
-    setKeyloggerBusy(true);
-    try {
-      const target = resolvePc(selectedPc);
-      const result = await window.remoteApi.runCommand(target.id, 'KEYLOGGER_STOP');
-      appendLog(`${result.ok ? 'OK' : 'FAIL'} KEYLOGGER_STOP: ${result.message}`);
-      setKeyloggerRunning(false);
-      await refreshKeyloggerLog();
-    } finally {
-      setKeyloggerBusy(false);
-    }
-  };
-
-  const handleRunWebcamCommand = async (
-    command: 'WEBCAM_START' | 'WEBCAM_RECORD_START' | 'WEBCAM_RECORD_STOP',
-  ) => {
-    if (!selectedPc) return;
-    setWebcamBusy(true);
-    try {
-      const target = resolvePc(selectedPc);
-      const result = await window.remoteApi.runCommand(target.id, command);
-      appendLog(
-        `${result.ok ? 'OK' : 'FAIL'} ${command}: ${result.message}${result.raw ? ` | ${result.raw}` : ''}`,
-      );
-    } finally {
-      setWebcamBusy(false);
-    }
-  };
+    const handleStopKeylogger = async () => {
+        setKeyloggerRunning(false);
+        appendLog('Input Test stopped.');
+    };
 
   const refreshProcessModal = async (target: RemotePc): Promise<CommandResult> => {
     const t = resolvePc(target);
@@ -528,30 +480,32 @@ function App() {
         }
       />
 
-      <KeyloggerModal
-        busy={keyloggerBusy}
-        content={keyloggerContent}
-        onClose={() => setKeyloggerOpen(false)}
-        onRefresh={() => void refreshKeyloggerLog()}
-        onStart={() => void handleStartKeylogger()}
-        onStop={() => void handleStopKeylogger()}
-        open={keyloggerOpen}
-        running={keyloggerRunning}
-        targetLabel={
-          selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
-        }
-      />
-      <WebcamModal
-        busy={webcamBusy}
-        onClose={() => setWebcamOpen(false)}
-        onStartRecord={() => void handleRunWebcamCommand('WEBCAM_RECORD_START')}
-        onStartWebcam={() => void handleRunWebcamCommand('WEBCAM_START')}
-        onStopRecord={() => void handleRunWebcamCommand('WEBCAM_RECORD_STOP')}
-        open={webcamOpen}
-        targetLabel={
-          selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
-        }
-      />
+          <KeyloggerModal
+              busy={keyloggerBusy}
+              content={keyloggerContent}
+              onClear={() => {
+                  setKeyloggerContent('');
+                  appendLog('Input Test cleared.');
+              }}
+              onClose={() => setKeyloggerOpen(false)}
+              onRefresh={() => void refreshKeyloggerLog()}
+              onStart={() => void handleStartKeylogger()}
+              onStop={() => void handleStopKeylogger()}
+              open={keyloggerOpen}
+              running={keyloggerRunning}
+              targetLabel={
+                  selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
+              }
+          />
+
+          <WebcamModal
+              busy={webcamBusy}
+              onClose={() => setWebcamOpen(false)}
+              open={webcamOpen}
+              targetLabel={
+                  selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
+              }
+          />
       <FileTransferModal
         busy={copyBusy}
         localPath={copyLocalPath}

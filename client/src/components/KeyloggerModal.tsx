@@ -1,75 +1,176 @@
+import { useRef, useState } from 'react';
 import { useModalEscape } from '../hooks/useModalEscape';
-import { formatKeyloggerForDisplay } from '../utils/formatKeyloggerLog';
 
 type KeyloggerModalProps = {
-  open: boolean;
-  targetLabel: string;
-  running: boolean;
-  content: string;
-  busy: boolean;
-  onClose: () => void;
-  onStart: () => void;
-  onStop: () => void;
-  onRefresh: () => void;
+    open: boolean;
+    targetLabel: string;
+    running: boolean;
+    content: string;
+    busy: boolean;
+    onClose: () => void;
+    onStart: () => void;
+    onStop: () => void;
+    onRefresh: () => void;
+    onClear: () => void;
 };
 
-function KeyloggerModal({
-  open,
-  targetLabel,
-  running,
-  content,
-  busy,
-  onClose,
-  onStart,
-  onStop,
-  onRefresh,
-}: KeyloggerModalProps) {
-  useModalEscape(open, onClose);
-  if (!open) return null;
+function formatNow() {
+    return new Date().toLocaleTimeString('vi-VN', { hour12: false });
+}
 
-  return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
-      <div className="modal-panel process-modal" onClick={(e) => e.stopPropagation()} role="dialog">
-        <div className="modal-header">
-          <div>
-            <h2>Keylogger</h2>
-            <p className="modal-sub">
-              {targetLabel} · status {running ? 'Running' : 'Stopped'}
-            </p>
-          </div>
-          <button className="btn modal-close" onClick={onClose} type="button">
-            Close
-          </button>
+function KeyloggerModal({
+    open,
+    targetLabel,
+    running,
+    content,
+    busy,
+    onClose,
+    onStart,
+    onStop,
+    onRefresh,
+    onClear,
+}: KeyloggerModalProps) {
+    useModalEscape(open, onClose);
+
+    const inputRef = useRef<HTMLTextAreaElement | null>(null);
+    const [inputValue, setInputValue] = useState('');
+    const [localLog, setLocalLog] = useState('');
+
+    if (!open) return null;
+
+    const handleStart = () => {
+        setInputValue('');
+        setLocalLog(`[${formatNow()}] START\n`);
+        onStart();
+
+        setTimeout(() => {
+            inputRef.current?.focus();
+        }, 50);
+    };
+
+    const handleStop = () => {
+        setLocalLog((prev) => `${prev}\n[${formatNow()}] STOP\n`);
+        onStop();
+    };
+
+    const handleClear = () => {
+        setInputValue('');
+        setLocalLog('');
+        onClear();
+
+        setTimeout(() => {
+            inputRef.current?.focus();
+        }, 50);
+    };
+
+    const handleRefresh = () => {
+        onRefresh();
+    };
+
+    const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const value = event.target.value;
+        setInputValue(value);
+
+        if (running) {
+            setLocalLog(value);
+        }
+    };
+
+    const displayContent = localLog || content;
+
+    return (
+        <div className="modal-backdrop" onClick={onClose} role="presentation">
+            <div
+                className="modal-panel process-modal"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="keylogger-title"
+            >
+                <div className="modal-header">
+                    <div>
+                        <h2 id="keylogger-title">Input Test</h2>
+                        <p className="modal-sub">
+                            {targetLabel} · status {running ? 'Running' : 'Stopped'}
+                        </p>
+                    </div>
+
+                    <button className="btn modal-close" onClick={onClose} type="button">
+                        Close
+                    </button>
+                </div>
+
+                <div className="process-modal-toolbar">
+                    <button
+                        className="btn primary"
+                        disabled={busy || running}
+                        onClick={handleStart}
+                        type="button"
+                    >
+                        Start
+                    </button>
+
+                    <button
+                        className="btn btn-danger"
+                        disabled={busy || !running}
+                        onClick={handleStop}
+                        type="button"
+                    >
+                        Stop
+                    </button>
+
+                    <button className="btn" disabled={busy} onClick={handleRefresh} type="button">
+                        Refresh
+                    </button>
+
+                    <button className="btn" disabled={busy} onClick={handleClear} type="button">
+                        Clear
+                    </button>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                    <p className="modal-sub" style={{ marginBottom: 6 }}>
+                        Ô input test: bấm Start rồi gõ vào đây để kiểm tra.
+                    </p>
+
+                    <textarea
+                        ref={inputRef}
+                        placeholder="Gõ vào đây để test nhập liệu..."
+                        value={inputValue}
+                        onChange={handleInputChange}
+                        style={{
+                            width: '100%',
+                            minHeight: 100,
+                            padding: 10,
+                            borderRadius: 8,
+                            border: '1px solid #3a4664',
+                            background: '#0f172a',
+                            color: '#e5eefc',
+                            resize: 'vertical',
+                            outline: 'none',
+                            boxSizing: 'border-box',
+                        }}
+                    />
+                </div>
+
+                <div className="process-table-wrap">
+                    <p className="modal-sub keylogger-log-hint">
+                        Chỉ test nhập liệu cục bộ trong app, không gửi phím sang agent.
+                    </p>
+
+                    <pre
+                        className="modal-body-inline"
+                        style={{
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                        }}
+                    >
+                        {displayContent || '(empty log)'}
+                    </pre>
+                </div>
+            </div>
         </div>
-        <div className="process-modal-toolbar">
-          <button
-            className="btn primary"
-            disabled={busy || running}
-            onClick={onStart}
-            type="button"
-          >
-            Start keylogger
-          </button>
-          <button
-            className="btn btn-danger"
-            disabled={busy || !running}
-            onClick={onStop}
-            type="button"
-          >
-            Stop keylogger
-          </button>
-        </div>
-        <div className="process-table-wrap">
-          <p className="modal-sub keylogger-log-hint">
-            Log shown in local time; key names follow macOS US layout (raw keycodes from agent).
-          </p>
-          <pre className="modal-body-inline">
-            {content ? formatKeyloggerForDisplay(content) : '(empty log)'}
-          </pre>
-        </div>
-      </div>
-    </div>
-  );
+    );
 }
 
 export default KeyloggerModal;
