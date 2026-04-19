@@ -35,6 +35,27 @@ if(OpenCV_FOUND)
   target_compile_definitions(remote_agent PRIVATE HAVE_OPENCV)
   target_include_directories(remote_agent PRIVATE ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(remote_agent ${OpenCV_LIBS})
+
+  # Windows + OpenCV động (vcpkg): copy opencv*.dll cạnh exe để chạy không cần cài OpenCV.
+  # Cách khác: build triplet x64-windows-static để nhét OpenCV vào exe (file to hơn).
+  if(WIN32)
+    get_filename_component(_opencv_triplet_root "${OpenCV_DIR}/../.." ABSOLUTE)
+    set(_opencv_bin "${_opencv_triplet_root}/bin")
+    if(EXISTS "${_opencv_bin}")
+      file(GLOB _opencv_dlls "${_opencv_bin}/opencv*.dll")
+      foreach(dll ${_opencv_dlls})
+        add_custom_command(
+          TARGET remote_agent
+          POST_BUILD
+          COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${dll}" "$<TARGET_FILE_DIR:remote_agent>"
+          COMMENT "Copy OpenCV runtime: ${dll}"
+        )
+      endforeach()
+      if(NOT _opencv_dlls)
+        message(STATUS "No opencv*.dll in ${_opencv_bin} — nếu webcam lỗi thiếu DLL, copy thủ công từ thư mục bin của triplet vcpkg.")
+      endif()
+    endif()
+  endif()
 else()
   message(STATUS "OpenCV not found — build succeeds but webcam needs OpenCV (brew install opencv / vcpkg)")
 endif()
