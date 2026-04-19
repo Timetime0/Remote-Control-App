@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(remote_agent
     src/main.cpp
     src/commands.cpp
+    src/utils.cpp
     src/screenshot.cpp
     src/app_manager.cpp
     src/ping.cpp

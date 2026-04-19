@@ -1,4 +1,5 @@
 #include "process_manager.h"
+#include "utils.h"
 
 #include <algorithm>
 #include <sstream>
@@ -10,83 +11,6 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #endif
-
-// ===== UTILS =====
-static std::string escapeJson(const std::string& input) {
-    std::string out;
-    out.reserve(input.size());
-
-    for (char c : input) {
-        switch (c) {
-        case '\\':
-            out += "\\\\";
-            break;
-        case '"':
-            out += "\\\"";
-            break;
-        case '\n':
-            out += "\\n";
-            break;
-        case '\r':
-            out += "\\r";
-            break;
-        case '\t':
-            out += "\\t";
-            break;
-        default:
-            out += c;
-            break;
-        }
-    }
-
-    return out;
-}
-
-static std::string trim(const std::string& input) {
-    const auto start = input.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return "";
-
-    const auto end = input.find_last_not_of(" \t\r\n");
-    return input.substr(start, end - start + 1);
-}
-
-static std::string runShellCommand(const std::string& command) {
-#ifdef _WIN32
-    FILE* pipe = _popen(command.c_str(), "r");
-#else
-    FILE* pipe = popen(command.c_str(), "r");
-#endif
-
-    if (!pipe) {
-        return "shell_error";
-    }
-
-    char buffer[512];
-    std::string output;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
-    }
-
-#ifdef _WIN32
-    _pclose(pipe);
-#else
-    pclose(pipe);
-#endif
-
-    return trim(output);
-}
-
-static std::string joinParts(const std::vector<std::string>& parts, size_t from) {
-    std::string out;
-
-    for (size_t i = from; i < parts.size(); ++i) {
-        if (i > from) out += ' ';
-        out += parts[i];
-    }
-
-    return out;
-}
 
 static std::string toLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), ::tolower);

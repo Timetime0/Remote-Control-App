@@ -1,50 +1,7 @@
 #include "system_power.h"
+#include "utils.h"
 
-#include <cstdio>
 #include <string>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
-static std::string trim(const std::string& input) {
-    const auto start = input.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return "";
-    const auto end = input.find_last_not_of(" \t\r\n");
-    return input.substr(start, end - start + 1);
-}
-
-static std::string escapeJson(const std::string& input) {
-    std::string esc;
-    for (char c : input) {
-        if (c == '\\') esc += "\\\\";
-        else if (c == '"') esc += "\\\"";
-        else if (c == '\n') esc += "\\n";
-        else esc += c;
-    }
-    return esc;
-}
-
-static std::string runShellCommand(const std::string& command) {
-#ifdef _WIN32
-    FILE* pipe = _popen(command.c_str(), "r");
-#else
-    FILE* pipe = popen(command.c_str(), "r");
-#endif
-    if (!pipe) return "shell_error";
-
-    char buffer[512];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
-    }
-#ifdef _WIN32
-    _pclose(pipe);
-#else
-    pclose(pipe);
-#endif
-    return trim(output);
-}
 
 std::string shutdownOrRestartJson(const std::string& commandLabel) {
 #if defined(_WIN32) || defined(__APPLE__)

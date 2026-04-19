@@ -1,4 +1,5 @@
 #include "keylogger.h"
+#include "utils.h"
 
 #include <fstream>
 #include <mutex>
@@ -10,21 +11,6 @@
 #include <ApplicationServices/ApplicationServices.h>
 #include <ctime>
 #endif
-
-static std::string escapeJson(const std::string& input) {
-    std::string out;
-    for (char c : input) {
-        switch (c) {
-        case '\\': out += "\\\\"; break;
-        case '"': out += "\\\""; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default: out += c; break;
-        }
-    }
-    return out;
-}
 
 #ifdef __APPLE__
 

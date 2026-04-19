@@ -1,4 +1,5 @@
 #include "webcam.h"
+#include "utils.h"
 
 #include <atomic>
 #include <chrono>
@@ -39,19 +40,6 @@ static std::string g_recordFileName;
 static int g_frameW = 0;
 static int g_frameH = 0;
 #endif
-
-static std::string escapeJson(const std::string& input) {
-    std::string out;
-    for (char c : input) {
-        if (c == '\\') out += "\\\\";
-        else if (c == '"') out += "\\\"";
-        else if (c == '\n') out += "\\n";
-        else if (c == '\r') out += "\\r";
-        else if (c == '\t') out += "\\t";
-        else out += c;
-    }
-    return out;
-}
 
 static void sendAllSock(SocketType s, const std::string& data) {
     size_t total = 0;
@@ -108,8 +96,6 @@ static void closeWriterLocked() {
 static void workerLoop() {
     const int jpegQuality = 72;
     const int sleepMs = 50;
-    static const char* table =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     while (g_streaming) {
         cv::Mat frame;
@@ -139,27 +125,7 @@ static void workerLoop() {
             continue;
         }
 
-        std::string b64;
-        b64.reserve(((jpg.size() + 2) / 3) * 4);
-        size_t i = 0;
-        for (; i + 2 < jpg.size(); i += 3) {
-            const unsigned n = (static_cast<unsigned>(jpg[i]) << 16) |
-                               (static_cast<unsigned>(jpg[i + 1]) << 8) |
-                               static_cast<unsigned>(jpg[i + 2]);
-            b64.push_back(table[(n >> 18) & 0x3F]);
-            b64.push_back(table[(n >> 12) & 0x3F]);
-            b64.push_back(table[(n >> 6) & 0x3F]);
-            b64.push_back(table[n & 0x3F]);
-        }
-        if (i < jpg.size()) {
-            const unsigned pad = static_cast<unsigned>(jpg.size() - i);
-            unsigned n = static_cast<unsigned>(jpg[i]) << 16;
-            if (pad == 2) n |= static_cast<unsigned>(jpg[i + 1]) << 8;
-            b64.push_back(table[(n >> 18) & 0x3F]);
-            b64.push_back(table[(n >> 12) & 0x3F]);
-            b64.push_back(pad == 2 ? table[(n >> 6) & 0x3F] : '=');
-            b64.push_back('=');
-        }
+        const std::string b64 = base64Encode(jpg);
 
         SocketType client = kInvalidSocket;
         {

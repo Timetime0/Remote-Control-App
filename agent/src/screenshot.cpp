@@ -1,4 +1,5 @@
 #include "screenshot.h"
+#include "utils.h"
 
 #include <cstdio>
 #include <sstream>
@@ -12,20 +13,6 @@
 #pragma comment(lib, "gdiplus.lib")
 using namespace Gdiplus;
 #endif
-
-static std::string escapeJson(const std::string& input) {
-    std::string out;
-    for (char c : input) {
-        switch (c) {
-        case '\\': out += "\\\\"; break;
-        case '"': out += "\\\""; break;
-        case '\n': out += "\\n"; break;
-        case '\r': break;
-        default: out += c;
-        }
-    }
-    return out;
-}
 
 #ifdef _WIN32
 
@@ -49,37 +36,6 @@ static int getEncoderClsid(const WCHAR* mimeType, CLSID* clsid) {
     }
 
     return -1;
-}
-
-static std::string base64Encode(const BYTE* data, size_t len) {
-    static const char table[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    std::string out;
-
-    for (size_t i = 0; i < len; i += 3) {
-        unsigned int value = 0;
-        int count = 0;
-
-        for (int j = 0; j < 3; ++j) {
-            value <<= 8;
-            if (i + j < len) {
-                value |= data[i + j];
-                ++count;
-            }
-        }
-
-        for (int j = 0; j < 4; ++j) {
-            if (j <= count) {
-                out += table[(value >> (18 - j * 6)) & 0x3F];
-            }
-            else {
-                out += '=';
-            }
-        }
-    }
-
-    return out;
 }
 
 std::string captureScreenshotJson() {
@@ -184,7 +140,7 @@ std::string captureScreenshotJson() {
 
     std::string base64;
     if (bytes && size > 0) {
-        base64 = base64Encode(bytes, static_cast<size_t>(size));
+        base64 = base64Encode(reinterpret_cast<const unsigned char*>(bytes), static_cast<size_t>(size));
     }
 
     if (bytes) {
@@ -210,26 +166,6 @@ std::string captureScreenshotJson() {
 }
 
 #elif defined(__APPLE__)
-
-static std::string trim(const std::string& input) {
-    const auto start = input.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return "";
-    const auto end = input.find_last_not_of(" \t\r\n");
-    return input.substr(start, end - start + 1);
-}
-
-static std::string runShellCommand(const std::string& command) {
-    FILE* pipe = popen(command.c_str(), "r");
-    if (!pipe) return "shell_error";
-
-    char buffer[4096];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
-    }
-    pclose(pipe);
-    return trim(output);
-}
 
 std::string captureScreenshotJson() {
     const std::string cmd =
