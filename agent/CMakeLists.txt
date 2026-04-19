@@ -22,7 +22,7 @@ add_executable(remote_agent
 )
 
 if(WIN32)
-  target_link_libraries(remote_agent ws2_32)
+  target_link_libraries(remote_agent ws2_32 user32)
 endif()
 
 if(APPLE)

