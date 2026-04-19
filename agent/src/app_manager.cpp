@@ -33,20 +33,6 @@ static std::string getFileName(const std::string& path) {
     return (pos == std::string::npos) ? path : path.substr(pos + 1);
 }
 
-static std::string resolveAlias(const std::string& input) {
-    std::string s = toLower(input);
-
-    if (s == "paint") return "mspaint.exe";
-    if (s == "note") return "notepad.exe";
-    if (s == "calc") return "calc.exe";
-    if (s == "cmd") return "cmd.exe";
-    if (s == "word") return "winword.exe";
-    if (s == "excel") return "excel.exe";
-    if (s == "powerpoint") return "powerpnt.exe";
-
-    return "";
-}
-
 static bool match(const std::string& name, const std::string& input) {
     std::string a = toLower(name);
     std::string b = toLower(input);
@@ -188,16 +174,10 @@ std::string cmdListApps() {
     return "{\"ok\":true,\"command\":\"LIST_APPS\",\"items\":" + oss.str() + "}";
 }
 
-std::string cmdStart(const std::vector<std::string>& parts) {
-    const std::string target = joinParts(parts, 1);
-    if (target.empty())
-        return jsonCommandResponse(false, "missing_app", "START_APP_BY_NAME");
-
-    std::string alias = resolveAlias(target);
-    if (!alias.empty()) {
-        HINSTANCE res = ShellExecuteA(NULL, "open", alias.c_str(), NULL, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)res > 32)
-            return jsonCommandResponse(true, "started " + alias, "START_APP_BY_NAME");
+std::string startExecutableByName(const std::string& target, const std::string& commandLabel) {
+    if (target.empty()) {
+        const char* msg = (commandLabel == "START_PROCESS") ? "missing_name" : "missing_app";
+        return jsonCommandResponse(false, msg, commandLabel);
     }
 
     std::string tryExe = target;
@@ -206,7 +186,7 @@ std::string cmdStart(const std::vector<std::string>& parts) {
 
     HINSTANCE res = ShellExecuteA(NULL, "open", tryExe.c_str(), NULL, NULL, SW_SHOWNORMAL);
     if ((INT_PTR)res > 32)
-        return jsonCommandResponse(true, "started " + tryExe, "START_APP_BY_NAME");
+        return jsonCommandResponse(true, "started " + tryExe, commandLabel);
 
     buildCache();
 
@@ -215,11 +195,15 @@ std::string cmdStart(const std::vector<std::string>& parts) {
             HINSTANCE r = ShellExecuteA(NULL, "open", app.path.c_str(), NULL, NULL, SW_SHOWNORMAL);
 
             if ((INT_PTR)r > 32)
-                return jsonCommandResponse(true, "started " + app.name, "START_APP_BY_NAME");
+                return jsonCommandResponse(true, "started " + app.name, commandLabel);
         }
     }
 
-    return jsonCommandResponse(false, "not_found", "START_APP_BY_NAME");
+    return jsonCommandResponse(false, "not_found", commandLabel);
+}
+
+std::string cmdStart(const std::vector<std::string>& parts) {
+    return startExecutableByName(joinParts(parts, 1), "START_APP_BY_NAME");
 }
 
 std::string cmdStop(const std::vector<std::string>& parts) {
@@ -352,21 +336,26 @@ std::string cmdListApps() {
     return "{\"ok\":true,\"command\":\"LIST_APPS\",\"items\":" + oss.str() + "}";
 }
 
-std::string cmdStart(const std::vector<std::string>& parts) {
-    const std::string appName = joinParts(parts, 1);
-    if (appName.empty())
-        return jsonCommandResponse(false, "missing_app", "START_APP_BY_NAME");
+std::string startExecutableByName(const std::string& target, const std::string& commandLabel) {
+    if (target.empty()) {
+        const char* msg = (commandLabel == "START_PROCESS") ? "missing_name" : "missing_app";
+        return jsonCommandResponse(false, msg, commandLabel);
+    }
 
     const std::string out =
-        runShellCommand("open -a \"" + escapeForDoubleQuotedShell(appName) + "\" 2>&1");
+        runShellCommand("open -a \"" + escapeForDoubleQuotedShell(target) + "\" 2>&1");
     const bool shellFailed = (out == "shell_error");
     if (shellFailed) {
-        return jsonCommandResponse(false, "shell_failed", "START_APP_BY_NAME");
+        return jsonCommandResponse(false, "shell_failed", commandLabel);
     }
     if (!out.empty() && out.find("Unable to find") != std::string::npos) {
-        return jsonCommandResponse(false, out, "START_APP_BY_NAME");
+        return jsonCommandResponse(false, out, commandLabel);
     }
-    return jsonCommandResponse(true, out.empty() ? "started" : out, "START_APP_BY_NAME");
+    return jsonCommandResponse(true, out.empty() ? "started" : out, commandLabel);
+}
+
+std::string cmdStart(const std::vector<std::string>& parts) {
+    return startExecutableByName(joinParts(parts, 1), "START_APP_BY_NAME");
 }
 
 std::string cmdStop(const std::vector<std::string>& parts) {
@@ -395,12 +384,20 @@ std::string cmdStop(const std::vector<std::string>& parts) {
 
 #else
 
+std::string startExecutableByName(const std::string& target, const std::string& commandLabel) {
+    if (target.empty()) {
+        const char* msg = (commandLabel == "START_PROCESS") ? "missing_name" : "missing_app";
+        return jsonCommandResponse(false, msg, commandLabel);
+    }
+    return jsonCommandResponse(false, "not_supported", commandLabel);
+}
+
 std::string cmdListApps() {
     return jsonCommandResponse(false, "not_supported", "LIST_APPS");
 }
 
-std::string cmdStart(const std::vector<std::string>&) {
-    return jsonCommandResponse(false, "not_supported", "START_APP_BY_NAME");
+std::string cmdStart(const std::vector<std::string>& parts) {
+    return startExecutableByName(joinParts(parts, 1), "START_APP_BY_NAME");
 }
 
 std::string cmdStop(const std::vector<std::string>&) {
