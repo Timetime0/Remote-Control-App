@@ -16,6 +16,9 @@ remote_agent_test
 *.out
 *.app
 
+# OpenCV path máy cục bộ (copy từ OpenCVPath.cmake.example)
+OpenCVPath.cmake
+
 # OS/editor files
 .DS_Store
 *.swp

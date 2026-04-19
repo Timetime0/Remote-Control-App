@@ -29,6 +29,20 @@ if(APPLE)
   target_link_libraries(remote_agent "-framework ApplicationServices")
 endif()
 
+# --- OpenCV (webcam) — đường dẫn trên máy bạn ---------------------------------
+# Thư mục phải chứa OpenCVConfig.cmake (thường là .../build, .../install/lib/cmake/opencv4).
+#
+# Cách 1 — file cục bộ (khuyến nghị): copy OpenCVPath.cmake.example -> OpenCVPath.cmake,
+#         sửa đường dẫn trong OpenCVPath.cmake (file này được .gitignore, không đẩy lên git).
+#
+# Cách 2 — Visual Studio Code (CMake Tools): tạo .vscode/settings.json ở root repo với:
+#         "cmake.configureSettings": { "OpenCV_DIR": "C:/path/to/opencv/build" }
+#         hoặc "cmake.configureArgs": ["-DOpenCV_DIR=C:/path/to/opencv/build"]
+#
+# Cách 3 — dòng lệnh: cmake -S agent -B build -DOpenCV_DIR=C:/path/to/opencv/build
+#
+include("${CMAKE_CURRENT_LIST_DIR}/OpenCVPath.cmake" OPTIONAL)
+
 find_package(OpenCV QUIET COMPONENTS core videoio imgcodecs imgproc)
 if(OpenCV_FOUND)
   message(STATUS "OpenCV ${OpenCV_VERSION} — webcam enabled")
