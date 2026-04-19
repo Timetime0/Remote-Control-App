@@ -502,6 +502,7 @@ function App() {
               busy={webcamBusy}
               onClose={() => setWebcamOpen(false)}
               open={webcamOpen}
+              pcId={selectedPc?.id ?? null}
               targetLabel={
                   selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
               }

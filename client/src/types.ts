@@ -18,6 +18,7 @@ export type RemoteCommand =
   | 'SHUTDOWN'
   | 'RESTART'
   | 'WEBCAM_START'
+  | 'WEBCAM_STOP'
   | 'WEBCAM_RECORD_START'
   | 'WEBCAM_RECORD_STOP'
   | 'MOUSE_MOVE'
