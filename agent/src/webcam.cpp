@@ -1,6 +1,7 @@
 #include "webcam.h"
 #include "utils.h"
 
+#include <iostream>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -59,6 +60,7 @@ static std::string jsonErr(const std::string& cmd, const std::string& msg) {
 
 std::string webcamStartSession(SocketType client) {
     (void)client;
+    std::cerr << "[webcam] WEBCAM_START rejected: built without OpenCV\n";
     return jsonErr("WEBCAM_START", "agent built without OpenCV; install OpenCV and rebuild");
 }
 
@@ -96,6 +98,9 @@ static void closeWriterLocked() {
 static void workerLoop() {
     const int jpegQuality = 72;
     const int sleepMs = 50;
+    int framesSent = 0;
+
+    std::cerr << "[webcam] worker thread started\n";
 
     while (g_streaming) {
         cv::Mat frame;
@@ -141,9 +146,16 @@ static void workerLoop() {
         msg += b64;
         msg += "\"}\n<<END>>\n";
         sendAllSock(client, msg);
+        ++framesSent;
+        if (framesSent == 1 || framesSent % 60 == 0) {
+            std::cerr << "[webcam] sent WEBCAM_FRAME #" << framesSent << " (jpg bytes=" << jpg.size()
+                      << ")\n";
+        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
     }
+
+    std::cerr << "[webcam] worker exiting (frames_sent=" << framesSent << ")\n";
 
     std::lock_guard<std::mutex> lock(g_stateMutex);
     closeWriterLocked();
@@ -152,32 +164,52 @@ static void workerLoop() {
 }
 
 std::string webcamStartSession(SocketType client) {
-    if (client == kInvalidSocket) return jsonErr("WEBCAM_START", "invalid_client");
+    std::cerr << "[webcam] WEBCAM_START requested (client_fd=";
+#ifdef _WIN32
+    std::cerr << static_cast<int>(client);
+#else
+    std::cerr << client;
+#endif
+    std::cerr << ")\n";
+
+    if (client == kInvalidSocket) {
+        std::cerr << "[webcam] WEBCAM_START failed: invalid_client\n";
+        return jsonErr("WEBCAM_START", "invalid_client");
+    }
 
     {
         std::lock_guard<std::mutex> lock(g_stateMutex);
-        if (g_streaming) return jsonErr("WEBCAM_START", "already_running");
+        if (g_streaming) {
+            std::cerr << "[webcam] WEBCAM_START failed: already_running\n";
+            return jsonErr("WEBCAM_START", "already_running");
+        }
     }
 
     cv::VideoCapture tmp;
     if (!openCapture(tmp) || !tmp.isOpened()) {
+        std::cerr << "[webcam] WEBCAM_START failed: cannot_open_camera\n";
         return jsonErr("WEBCAM_START", "cannot_open_camera");
     }
 
     {
         std::lock_guard<std::mutex> lock(g_stateMutex);
-        if (g_streaming) return jsonErr("WEBCAM_START", "already_running");
+        if (g_streaming) {
+            std::cerr << "[webcam] WEBCAM_START failed: already_running (race)\n";
+            return jsonErr("WEBCAM_START", "already_running");
+        }
         g_cap.release();
         g_cap.swap(tmp);
         g_frameClient = client;
         g_streaming = true;
     }
 
+    std::cerr << "[webcam] WEBCAM_START ok, spawning worker\n";
     std::thread(workerLoop).detach();
     return "{\"ok\":true,\"command\":\"WEBCAM_START\"}";
 }
 
 void webcamStopSession() {
+    std::cerr << "[webcam] WEBCAM_STOP\n";
     g_streaming = false;
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
 

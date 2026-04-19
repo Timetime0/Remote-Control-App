@@ -23,7 +23,26 @@ function WebcamModal({ open, pcId, targetLabel, busy, onClose }: WebcamModalProp
   useEffect(() => {
     if (!open || !pcId) return;
 
+    console.log('[WebcamModal] subscribe onWebcamFrame', { pcId });
+
+    let frameLogCount = 0;
     const unsub = window.remoteApi.onWebcamFrame((payload) => {
+      const dataLen = typeof payload.data === 'string' ? payload.data.length : 0;
+      if (payload.command !== 'WEBCAM_FRAME' || frameLogCount < 5) {
+        console.log('[WebcamModal] onWebcamFrame', {
+          command: payload.command,
+          ok: payload.ok,
+          message: payload.message,
+          dataLen,
+        });
+      }
+      if (payload.command === 'WEBCAM_FRAME' && payload.ok === true) {
+        frameLogCount += 1;
+        if (frameLogCount === 6) {
+          console.log('[WebcamModal] (suppressing further WEBCAM_FRAME logs)');
+        }
+      }
+
       if (payload.command === 'WEBCAM_START') {
         if (payload.ok === false) {
           setStatus(typeof payload.message === 'string' ? payload.message : 'Webcam start failed');
@@ -45,10 +64,13 @@ function WebcamModal({ open, pcId, targetLabel, busy, onClose }: WebcamModalProp
         setHasStream(true);
       } else if (payload.ok === false && typeof payload.message === 'string') {
         setStatus(payload.message);
+      } else {
+        console.warn('[WebcamModal] frame payload not handled', payload);
       }
     });
 
     return () => {
+      console.log('[WebcamModal] cleanup: unsub + stopWebcam', { pcId });
       unsub();
       void window.remoteApi.stopWebcam(pcId);
     };
@@ -85,13 +107,16 @@ function WebcamModal({ open, pcId, targetLabel, busy, onClose }: WebcamModalProp
     setStatus('Connecting…');
     setPreviewUrl('');
     try {
+      console.log('[WebcamModal] startWebcam invoke', { pcId });
       const res = await window.remoteApi.startWebcam(pcId);
+      console.log('[WebcamModal] startWebcam result', res);
       if (!res.ok) {
         setStatus(res.message ?? 'Cannot start webcam stream');
       } else {
         setStatus('Waiting for agent…');
       }
     } catch (e) {
+      console.warn('[WebcamModal] startWebcam threw', e);
       setStatus((e as Error).message);
     } finally {
       setActionBusy(false);

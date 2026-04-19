@@ -153,18 +153,27 @@ const sendAgentCommand = (
     win: BrowserWindow,
   ) {
     if (webcamSockets.has(pcId)) {
+      console.warn('[webcam-main] startWebcamStream: socket already exists for pcId, skipping', pcId);
       return;
     }
 
+    console.log('[webcam-main] connecting', { pcId, host, port });
+
     const socket = new net.Socket();
     let buffer = '';
+    let recvLogCount = 0;
 
     socket.connect(port, host, () => {
+      console.log('[webcam-main] connected, sending WEBCAM_START');
       socket.write('WEBCAM_START\n');
     });
 
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
+      if (recvLogCount < 3) {
+        recvLogCount += 1;
+        console.log('[webcam-main] recv chunk', recvLogCount, 'bytes=', chunk.length, 'bufferLen=', buffer.length);
+      }
 
       let pos: number;
       while ((pos = buffer.indexOf('\n<<END>>\n')) !== -1) {
@@ -175,18 +184,33 @@ const sendAgentCommand = (
 
         try {
           const parsed = JSON.parse(rawMessage) as Record<string, unknown>;
+          const cmd = typeof parsed.command === 'string' ? parsed.command : '?';
+          const ok = parsed.ok === true;
+          const dataLen = typeof parsed.data === 'string' ? parsed.data.length : 0;
+          console.log('[webcam-main] parsed message', { command: cmd, ok, dataLen, rawHead: rawMessage.slice(0, 120) });
           win.webContents.send('agent:webcam-frame', parsed);
-        } catch {
-          // ignore invalid json
+        } catch (e) {
+          console.warn('[webcam-main] JSON.parse failed', (e as Error).message, 'rawHead=', rawMessage.slice(0, 200));
         }
       }
     });
 
     socket.on('close', () => {
+      console.log('[webcam-main] socket closed', pcId);
       webcamSockets.delete(pcId);
     });
 
-    socket.on('error', () => {
+    socket.on('error', (err) => {
+      console.warn('[webcam-main] socket error', pcId, err.message);
+      try {
+        win.webContents.send('agent:webcam-frame', {
+          ok: false,
+          command: 'WEBCAM_START',
+          message: `socket: ${err.message}`,
+        });
+      } catch {
+        // window may be gone
+      }
       webcamSockets.delete(pcId);
     });
 
@@ -195,8 +219,12 @@ const sendAgentCommand = (
 
   function stopWebcamStream(pcId: string) {
     const socket = webcamSockets.get(pcId);
-    if (!socket) return;
+    if (!socket) {
+      console.log('[webcam-main] stopWebcamStream: no socket for', pcId);
+      return;
+    }
 
+    console.log('[webcam-main] stopWebcamStream', pcId);
     try {
       socket.write('WEBCAM_STOP\n');
     } catch {
