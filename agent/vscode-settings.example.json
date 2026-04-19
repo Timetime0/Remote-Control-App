@@ -1,7 +1,0 @@
-{
-  "cmake.sourceDirectory": "${workspaceFolder}/agent",
-  "cmake.buildDirectory": "${workspaceFolder}/agent/build-vscode",
-  "cmake.configureSettings": {
-    "OpenCV_DIR": "C:/CHANGE_ME/opencv/build"
-  }
-}

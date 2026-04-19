@@ -33,13 +33,14 @@ endif()
 # Thư mục phải chứa OpenCVConfig.cmake (thường là .../build, .../install/lib/cmake/opencv4).
 #
 # Cách 1 — file cục bộ (khuyến nghị): copy OpenCVPath.cmake.example -> OpenCVPath.cmake,
-#         sửa đường dẫn trong OpenCVPath.cmake (file này được .gitignore, không đẩy lên git).
+#         sửa OpenCV_DIR trong đó (file được .gitignore).
 #
-# Cách 2 — Visual Studio Code (CMake Tools): tạo .vscode/settings.json ở root repo với:
-#         "cmake.configureSettings": { "OpenCV_DIR": "C:/path/to/opencv/build" }
-#         hoặc "cmake.configureArgs": ["-DOpenCV_DIR=C:/path/to/opencv/build"]
+# Cách 2 — Microsoft Visual Studio (CMake): mở folder agent/ chứa CMakeLists.txt;
+#         Project -> CMake Settings -> thêm biến OpenCV_DIR hoặc cmakeCommandArgs:
+#         -DOpenCV_DIR=C:/path/to/opencv/build
+#         (hoặc copy CMakeSettings.json.example -> CMakeSettings.json và chỉnh đường dẫn.)
 #
-# Cách 3 — dòng lệnh: cmake -S agent -B build -DOpenCV_DIR=C:/path/to/opencv/build
+# Cách 3 — dòng lệnh: cmake -S . -B build -DOpenCV_DIR=C:/path/to/opencv/build
 #
 include("${CMAKE_CURRENT_LIST_DIR}/OpenCVPath.cmake" OPTIONAL)
 
