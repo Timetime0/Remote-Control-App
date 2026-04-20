@@ -1,0 +1,6 @@
+# Sao chép file này thành OpenCVPath.cmake (cùng thư mục agent/) và sửa đường dẫn.
+# Dùng với Microsoft Visual Studio (CMake) hoặc cmake trên dòng lệnh.
+# OpenCVPath.cmake đã được .gitignore — không commit máy cá nhân.
+
+# Thư mục phải chứa file OpenCVConfig.cmake (Windows ví dụ: C:/opencv/build)
+set(OpenCV_DIR "C:/CHANGE_ME/opencv/build" CACHE PATH "" FORCE)

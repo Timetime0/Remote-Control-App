@@ -1,125 +1,15 @@
 #include "file_ops.h"
+#include "utils.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
-
-static std::string trim(const std::string& input) {
-    const auto start = input.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return "";
-    const auto end = input.find_last_not_of(" \t\r\n");
-    return input.substr(start, end - start + 1);
-}
-
-static std::string escapeJson(const std::string& input) {
-    std::string out;
-    for (char c : input) {
-        if (c == '\\') out += "\\\\";
-        else if (c == '"') out += "\\\"";
-        else if (c == '\n') out += "\\n";
-        else if (c == '\r') out += "\\r";
-        else if (c == '\t') out += "\\t";
-        else out += c;
-    }
-    return out;
-}
-
-static std::string runShellCommand(const std::string& command) {
-#ifdef _WIN32
-    FILE* pipe = _popen(command.c_str(), "r");
-#else
-    FILE* pipe = popen(command.c_str(), "r");
-#endif
-    if (!pipe) return "shell_error";
-
-    char buffer[1024];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
-    }
-#ifdef _WIN32
-    _pclose(pipe);
-#else
-    pclose(pipe);
-#endif
-    return trim(output);
-}
-
-static std::vector<std::string> splitLines(const std::string& s) {
-    std::vector<std::string> out;
-    std::istringstream stream(s);
-    std::string line;
-    while (std::getline(stream, line)) {
-        const std::string t = trim(line);
-        if (!t.empty()) out.push_back(t);
-    }
-    return out;
-}
-
-static std::string base64Encode(const std::vector<unsigned char>& data) {
-    static const char* table =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve(((data.size() + 2) / 3) * 4);
-    size_t i = 0;
-    while (i + 2 < data.size()) {
-        const unsigned int n = (static_cast<unsigned int>(data[i]) << 16) |
-                                 (static_cast<unsigned int>(data[i + 1]) << 8) |
-                                 static_cast<unsigned int>(data[i + 2]);
-        out.push_back(table[(n >> 18) & 0x3F]);
-        out.push_back(table[(n >> 12) & 0x3F]);
-        out.push_back(table[(n >> 6) & 0x3F]);
-        out.push_back(table[n & 0x3F]);
-        i += 3;
-    }
-    if (i < data.size()) {
-        unsigned int n = static_cast<unsigned int>(data[i]) << 16;
-        out.push_back(table[(n >> 18) & 0x3F]);
-        if (i + 1 < data.size()) {
-            n |= static_cast<unsigned int>(data[i + 1]) << 8;
-            out.push_back(table[(n >> 12) & 0x3F]);
-            out.push_back(table[(n >> 6) & 0x3F]);
-            out.push_back('=');
-        } else {
-            out.push_back(table[(n >> 12) & 0x3F]);
-            out.push_back('=');
-            out.push_back('=');
-        }
-    }
-    return out;
-}
-
-static bool base64Decode(const std::string& input, std::vector<unsigned char>& out) {
-    static const std::string chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::vector<int> table(256, -1);
-    for (size_t i = 0; i < chars.size(); ++i) {
-        table[static_cast<unsigned char>(chars[i])] = static_cast<int>(i);
-    }
-
-    out.clear();
-    int val = 0;
-    int valb = -8;
-    for (unsigned char c : input) {
-        if (c == '=') break;
-        if (c == '\r' || c == '\n' || c == ' ' || c == '\t') continue;
-        if (table[c] == -1) return false;
-        val = (val << 6) + table[c];
-        valb += 6;
-        if (valb >= 0) {
-            out.push_back(static_cast<unsigned char>((val >> valb) & 0xFF));
-            valb -= 8;
-        }
-    }
-    return true;
-}
 
 static bool isBareFileNameForWrite(const std::string& path) {
     if (path.empty()) return false;

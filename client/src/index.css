@@ -120,6 +120,30 @@ body {
   font-size: 18px;
 }
 
+.console-panel {
+  min-width: 0;
+}
+
+.console-output {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
+.console-output pre {
+  margin: 0 0 8px;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.console-output pre:last-child {
+  margin-bottom: 0;
+}
+
 .full-width {
   grid-column: 1 / -1;
 }

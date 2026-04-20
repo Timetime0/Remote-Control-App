@@ -1,229 +1,315 @@
-import { useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useModalEscape } from '../hooks/useModalEscape';
 
 type WebcamModalProps = {
-    open: boolean;
-    targetLabel: string;
-    busy: boolean;
-    onClose: () => void;
+  open: boolean;
+  pcId: string | null;
+  targetLabel: string;
+  busy: boolean;
+  onClose: () => void;
 };
 
-function WebcamModal({
-    open,
-    targetLabel,
-    busy,
-    onClose,
-}: WebcamModalProps) {
-    useModalEscape(open, onClose);
+function WebcamModal({ open, pcId, targetLabel, busy, onClose }: WebcamModalProps) {
+  useModalEscape(open, onClose);
 
-    const videoRef = useRef<HTMLVideoElement | null>(null);
-    const streamRef = useRef<MediaStream | null>(null);
-    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const chunksRef = useRef<Blob[]>([]);
+  const [status, setStatus] = useState('Idle');
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [hasStream, setHasStream] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
 
-    const [recording, setRecording] = useState(false);
-    const [hasCamera, setHasCamera] = useState(false);
-    const [status, setStatus] = useState('Idle');
+  const combinedBusy = busy || actionBusy;
 
-    if (!open) return null;
+  useEffect(() => {
+    if (!open || !pcId) return;
 
-    const stopAllTracks = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.stop();
+    console.log('[WebcamModal] subscribe onWebcamFrame', { pcId });
+
+    let frameLogCount = 0;
+    const unsub = window.remoteApi.onWebcamFrame((payload) => {
+      const dataLen = typeof payload.data === 'string' ? payload.data.length : 0;
+      if (payload.command !== 'WEBCAM_FRAME' || frameLogCount < 5) {
+        console.log('[WebcamModal] onWebcamFrame', {
+          command: payload.command,
+          ok: payload.ok,
+          message: payload.message,
+          dataLen,
+        });
+      }
+      if (payload.command === 'WEBCAM_FRAME' && payload.ok === true) {
+        frameLogCount += 1;
+        if (frameLogCount === 6) {
+          console.log('[WebcamModal] (suppressing further WEBCAM_FRAME logs)');
         }
+      }
 
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach((track) => {
-                track.stop();
-            });
-            streamRef.current = null;
+      if (payload.command === 'WEBCAM_START') {
+        if (payload.ok === false) {
+          setStatus(typeof payload.message === 'string' ? payload.message : 'Webcam start failed');
+          setHasStream(false);
+          setPreviewUrl('');
+        } else {
+          setStatus('Camera started');
         }
+        return;
+      }
 
-        if (videoRef.current) {
-            videoRef.current.pause();
-            videoRef.current.srcObject = null;
-        }
+      if (
+        payload.ok === true &&
+        payload.command === 'WEBCAM_FRAME' &&
+        typeof payload.mime === 'string' &&
+        typeof payload.data === 'string'
+      ) {
+        setPreviewUrl(`data:${payload.mime};base64,${payload.data}`);
+        setHasStream(true);
+      } else if (payload.ok === false && typeof payload.message === 'string') {
+        setStatus(payload.message);
+      } else {
+        console.warn('[WebcamModal] frame payload not handled', payload);
+      }
+    });
 
-        setRecording(false);
-        setHasCamera(false);
+    return () => {
+      console.log('[WebcamModal] cleanup: unsub + stopWebcam', { pcId });
+      unsub();
+      void window.remoteApi.stopWebcam(pcId);
     };
+  }, [open, pcId]);
 
-    const handleClose = () => {
-        stopAllTracks();
-        setStatus('Idle');
-        onClose();
-    };
+  useEffect(() => {
+    if (!open) {
+      setStatus('Idle');
+      setPreviewUrl('');
+      setHasStream(false);
+      setRecording(false);
+      setActionBusy(false);
+    }
+  }, [open]);
 
-    const handleStartWebcam = async () => {
-        try {
-            if (streamRef.current) {
-                setStatus('Camera already started');
-                return;
-            }
+  const handleClose = () => {
+    if (pcId) {
+      void window.remoteApi.stopWebcam(pcId);
+    }
+    onClose();
+  };
 
-            setStatus('Requesting camera permission...');
+  const handleStartWebcam = async () => {
+    if (!pcId) {
+      alert('Chưa chọn máy đích.');
+      return;
+    }
+    if (hasStream) {
+      setStatus('Webcam đã bật');
+      return;
+    }
 
-            const mediaStream = await navigator.mediaDevices.getUserMedia({
-                video: true,
-                audio: false,
-            });
+    setActionBusy(true);
+    setStatus('Connecting…');
+    setPreviewUrl('');
+    try {
+      console.log('[WebcamModal] startWebcam invoke', { pcId });
+      const res = await window.remoteApi.startWebcam(pcId);
+      console.log('[WebcamModal] startWebcam result', res);
+      if (!res.ok) {
+        setStatus(res.message ?? 'Cannot start webcam stream');
+      } else {
+        setStatus('Waiting for agent…');
+      }
+    } catch (e) {
+      console.warn('[WebcamModal] startWebcam threw', e);
+      setStatus((e as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
-            streamRef.current = mediaStream;
+  const handleStartRecord = async () => {
+    if (!pcId) return;
+    if (!hasStream) {
+      alert('Hãy bật webcam trước.');
+      return;
+    }
 
-            if (videoRef.current) {
-                videoRef.current.srcObject = mediaStream;
-                await videoRef.current.play();
-            }
+    setActionBusy(true);
+    setStatus('Starting record on agent…');
+    try {
+      const result = await window.remoteApi.runCommand(pcId, 'WEBCAM_RECORD_START');
+      const parsed = JSON.parse(result.raw) as { ok?: boolean; message?: string };
+      if (parsed.ok === true) {
+        setRecording(true);
+        setStatus('Recording (on remote PC)…');
+      } else {
+        setStatus(parsed.message ?? 'WEBCAM_RECORD_START failed');
+        alert(parsed.message ?? 'Không bắt đầu ghi trên agent được.');
+      }
+    } catch (e) {
+      setStatus((e as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
-            setHasCamera(true);
-            setStatus('Camera started');
-        } catch (error) {
-            console.error('Cannot access webcam:', error);
-            setStatus('Cannot open webcam');
-            alert('Không mở được webcam. Hãy kiểm tra quyền camera trong trình duyệt.');
-        }
-    };
+  const handleStopRecord = async () => {
+    if (!pcId) return;
 
-    const handleStartRecord = () => {
-        const stream = streamRef.current;
+    setActionBusy(true);
+    setStatus('Stopping record & preparing file…');
+    try {
+      const result = await window.remoteApi.runCommand(pcId, 'WEBCAM_RECORD_STOP');
+      const parsed = JSON.parse(result.raw) as {
+        ok?: boolean;
+        path?: string;
+        filename?: string;
+        message?: string;
+      };
 
-        if (!stream) {
-            alert('Hãy mở webcam trước.');
-            return;
-        }
+      if (parsed.ok !== true || typeof parsed.path !== 'string') {
+        setStatus(parsed.message ?? 'WEBCAM_RECORD_STOP failed');
+        alert(parsed.message ?? 'Dừng ghi trên agent thất bại.');
+        return;
+      }
 
-        try {
-            chunksRef.current = [];
+      setRecording(false);
 
-            const recorder = new MediaRecorder(stream);
+      const defaultName =
+        typeof parsed.filename === 'string' && parsed.filename.length > 0
+          ? parsed.filename
+          : 'webcam-record.avi';
 
-            recorder.ondataavailable = (event: BlobEvent) => {
-                if (event.data.size > 0) {
-                    chunksRef.current.push(event.data);
-                }
-            };
+      const localPath = await window.remoteApi.pickSaveFile(defaultName);
+      if (!localPath) {
+        setStatus('Recording ready on agent (save cancelled)');
+        return;
+      }
 
-            recorder.onstop = () => {
-                const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
+      setStatus('Downloading recording…');
+      const dl = await window.remoteApi.downloadFile(pcId, parsed.path, localPath);
+      if (dl.ok) {
+        setStatus(`Saved: ${localPath}`);
+      } else {
+        setStatus(dl.message);
+        alert(`Tải file về máy client thất bại: ${dl.message}`);
+      }
+    } catch (e) {
+      setStatus((e as Error).message);
+      alert((e as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const handleStopWebcam = async () => {
+    if (!pcId) return;
 
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `webcam-record-${timestamp}.webm`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+    setActionBusy(true);
+    setStatus('Stopping webcam on agent…');
+    try {
+      await window.remoteApi.stopWebcam(pcId);
+      setPreviewUrl('');
+      setHasStream(false);
+      setRecording(false);
+      setStatus('Camera stopped');
+    } catch (e) {
+      setStatus((e as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
-                URL.revokeObjectURL(url);
-                setStatus('Recording saved');
-            };
+  if (!open) return null;
 
-            mediaRecorderRef.current = recorder;
-            recorder.start();
+  return (
+    <div className="modal-backdrop" onClick={handleClose} role="presentation">
+      <div
+        className="modal-panel process-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="webcam-title"
+      >
+        <div className="modal-header">
+          <div>
+            <h2 id="webcam-title">Webcam (remote agent)</h2>
+            <p className="modal-sub">{targetLabel}</p>
+            <p className="modal-sub">Status: {status}</p>
+          </div>
 
-            setRecording(true);
-            setStatus('Recording...');
-        } catch (error) {
-            console.error('Cannot start recording:', error);
-            setStatus('Cannot start recording');
-            alert('Không bắt đầu ghi hình được.');
-        }
-    };
-
-    const handleStopRecord = () => {
-        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
-            return;
-        }
-
-        mediaRecorderRef.current.stop();
-        setRecording(false);
-        setStatus('Stopping recording...');
-    };
-
-    const handleStopWebcam = () => {
-        stopAllTracks();
-        setStatus('Camera stopped');
-    };
-
-    return (
-        <div className="modal-backdrop" onClick={handleClose} role="presentation">
-            <div
-                className="modal-panel process-modal"
-                onClick={(e) => e.stopPropagation()}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="webcam-title"
-            >
-                <div className="modal-header">
-                    <div>
-                        <h2 id="webcam-title">Webcam Local</h2>
-                        <p className="modal-sub">{targetLabel}</p>
-                        <p className="modal-sub">Status: {status}</p>
-                    </div>
-
-                    <button className="btn modal-close" onClick={handleClose} type="button">
-                        Close
-                    </button>
-                </div>
-
-                <div className="process-modal-toolbar">
-                    <button
-                        className="btn primary"
-                        disabled={busy || hasCamera}
-                        onClick={handleStartWebcam}
-                        type="button"
-                    >
-                        Start webcam
-                    </button>
-
-                    <button
-                        className="btn"
-                        disabled={busy || !hasCamera || recording}
-                        onClick={handleStartRecord}
-                        type="button"
-                    >
-                        Start record
-                    </button>
-
-                    <button
-                        className="btn btn-danger"
-                        disabled={busy || !recording}
-                        onClick={handleStopRecord}
-                        type="button"
-                    >
-                        Stop record
-                    </button>
-
-                    <button
-                        className="btn"
-                        disabled={busy || !hasCamera}
-                        onClick={handleStopWebcam}
-                        type="button"
-                    >
-                        Stop webcam
-                    </button>
-                </div>
-
-                <div style={{ marginTop: 16 }}>
-                    <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        style={{
-                            width: '100%',
-                            maxHeight: 420,
-                            borderRadius: 10,
-                            background: '#000',
-                            objectFit: 'cover',
-                        }}
-                    />
-                </div>
-            </div>
+          <button className="btn modal-close" onClick={handleClose} type="button">
+            Close
+          </button>
         </div>
-    );
+
+        <div className="process-modal-toolbar">
+          <button
+            className="btn primary"
+            disabled={combinedBusy || hasStream}
+            onClick={() => void handleStartWebcam()}
+            type="button"
+          >
+            Start webcam
+          </button>
+
+          <button
+            className="btn"
+            disabled={combinedBusy || !hasStream || recording}
+            onClick={() => void handleStartRecord()}
+            type="button"
+          >
+            Start record
+          </button>
+
+          <button
+            className="btn btn-danger"
+            disabled={combinedBusy || !recording}
+            onClick={() => void handleStopRecord()}
+            type="button"
+          >
+            Stop record
+          </button>
+
+          <button
+            className="btn"
+            disabled={combinedBusy || !hasStream}
+            onClick={() => void handleStopWebcam()}
+            type="button"
+          >
+            Stop webcam
+          </button>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          {previewUrl ? (
+            <img
+              alt="Remote webcam"
+              src={previewUrl}
+              style={{
+                width: '100%',
+                maxHeight: 420,
+                borderRadius: 10,
+                background: '#000',
+                objectFit: 'contain',
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: '100%',
+                height: 320,
+                borderRadius: 10,
+                background: '#000',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#888',
+              }}
+            >
+              No video yet — start webcam on the agent
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default WebcamModal;

