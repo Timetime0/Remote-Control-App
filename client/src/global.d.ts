@@ -21,6 +21,18 @@ stopScreenViewer: (pcId: string) => Promise<{ ok: boolean; message?: string }>;
         }) => void,
       ) => () => void;
 
+      startWebcam: (pcId: string) => Promise<{ ok: boolean; message?: string }>;
+      stopWebcam: (pcId: string) => Promise<{ ok: boolean; message?: string }>;
+      onWebcamFrame: (
+        callback: (payload: {
+          ok?: boolean;
+          command?: string;
+          mime?: string;
+          data?: string;
+          message?: string;
+        }) => void,
+      ) => () => void;
+
       uploadFile: (pcId: string, localPath: string, remotePath: string) => Promise<CommandResult>;
       downloadFile: (pcId: string, remotePath: string, localPath: string) => Promise<CommandResult>;
       pickLocalFile: () => Promise<string | null>;

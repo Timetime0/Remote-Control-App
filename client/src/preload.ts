@@ -88,4 +88,39 @@ contextBridge.exposeInMainWorld('remoteApi', {
       ipcRenderer.removeListener('agent:screen-viewer-frame', handler);
     };
   },
+
+  startWebcam: (pcId: string): Promise<{ ok: boolean; message?: string }> =>
+    ipcRenderer.invoke('agent:start-webcam', { pcId }),
+
+  stopWebcam: (pcId: string): Promise<{ ok: boolean; message?: string }> =>
+    ipcRenderer.invoke('agent:stop-webcam', { pcId }),
+
+  onWebcamFrame: (
+    callback: (payload: {
+      ok?: boolean;
+      command?: string;
+      mime?: string;
+      data?: string;
+      message?: string;
+    }) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: {
+        ok?: boolean;
+        command?: string;
+        mime?: string;
+        data?: string;
+        message?: string;
+      },
+    ) => {
+      callback(payload);
+    };
+
+    ipcRenderer.on('agent:webcam-frame', handler);
+
+    return () => {
+      ipcRenderer.removeListener('agent:webcam-frame', handler);
+    };
+  },
 });
