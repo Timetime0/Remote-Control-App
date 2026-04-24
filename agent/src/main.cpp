@@ -118,7 +118,11 @@ int main() {
 
     while (true) {
         sockaddr_in clientAddr{};
+#ifdef _WIN32
         int clientLen = sizeof(clientAddr);
+#else
+        socklen_t clientLen = sizeof(clientAddr);
+#endif
 
         SocketType client = accept(
             serverSock,
