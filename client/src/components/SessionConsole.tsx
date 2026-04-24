@@ -11,7 +11,11 @@ function SessionConsole({ logs }: SessionConsoleProps) {
         {logs.length === 0 ? (
           <pre>[empty] No activity yet.</pre>
         ) : (
-          logs.map((line, index) => <pre key={`${index}-${line}`}>{line}</pre>)
+          logs.map((line, index) => (
+            <pre key={`${index}-${line}`} title={line} className="console-line">
+              {line}
+            </pre>
+          ))
         )}
       </div>
     </article>

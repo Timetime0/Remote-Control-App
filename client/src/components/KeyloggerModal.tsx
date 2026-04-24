@@ -10,13 +10,10 @@ type KeyloggerModalProps = {
   running: boolean;
   content: string;
   busy: boolean;
-  /** Local display cleared: polling is paused until user resumes or fetches from agent again. */
-  viewCleared: boolean;
   onClose: () => void;
   onStart: () => void;
+  onStop: () => void;
   onClearLog: () => void;
-  /** Fetches the latest keylog from the agent and shows it again. */
-  onResumeView: () => void;
 };
 
 function KeyloggerModal({
@@ -26,20 +23,16 @@ function KeyloggerModal({
   running,
   content,
   busy,
-  viewCleared,
   onClose,
   onStart,
+  onStop,
   onClearLog,
-  onResumeView,
 }: KeyloggerModalProps) {
   useModalEscape(open, onClose);
 
   const decodedText = useMemo(() => formatKeylogDisplay(content, targetOs), [content, targetOs]);
 
   const logBody = useMemo(() => {
-    if (viewCleared && !content.trim()) {
-      return '(log view cleared — use Show from agent to load the remote keylog again)';
-    }
     if (decodedText.length > 0) {
       return decodedText;
     }
@@ -47,7 +40,7 @@ function KeyloggerModal({
       return content;
     }
     return '(waiting for keyboard activity...)';
-  }, [viewCleared, content, decodedText]);
+  }, [content, decodedText]);
 
   if (!open) return null;
 
@@ -63,10 +56,7 @@ function KeyloggerModal({
                 <div className="modal-header">
                     <div>
                         <h2 id="keylogger-title">Keylogger</h2>
-                        <p className="modal-sub">
-                            {targetLabel} · status {running ? 'Running' : 'Stopped'}
-                            {viewCleared && ' · log view cleared (updates paused)'}
-                        </p>
+                        <p className="modal-sub">{targetLabel} · status {running ? 'Running' : 'Stopped'}</p>
                     </div>
 
                     <button className="btn modal-close" onClick={onClose} type="button">
@@ -85,24 +75,22 @@ function KeyloggerModal({
                     </button>
 
                     <button
+                        className="btn"
+                        disabled={busy || !running}
+                        onClick={onStop}
+                        type="button"
+                    >
+                        Stop
+                    </button>
+
+                    <button
                         className="btn btn-danger"
-                        disabled={busy || !running || viewCleared}
+                        disabled={busy}
                         onClick={onClearLog}
                         type="button"
                     >
-                        Clear log
+                        Clear logs
                     </button>
-
-                    {viewCleared && (
-                        <button
-                            className="btn"
-                            disabled={busy || !running}
-                            onClick={onResumeView}
-                            type="button"
-                        >
-                            Show from agent
-                        </button>
-                    )}
                 </div>
 
                 <div className="process-table-wrap">
