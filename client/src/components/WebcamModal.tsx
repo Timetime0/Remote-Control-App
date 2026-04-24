@@ -70,9 +70,7 @@ function WebcamModal({ open, pcId, targetLabel, busy, onClose }: WebcamModalProp
     });
 
     return () => {
-      console.log('[WebcamModal] cleanup: unsub + stopWebcam', { pcId });
-      unsub();
-      void window.remoteApi.stopWebcam(pcId);
+        unsub();
     };
   }, [open, pcId]);
 
@@ -86,12 +84,18 @@ function WebcamModal({ open, pcId, targetLabel, busy, onClose }: WebcamModalProp
     }
   }, [open]);
 
-  const handleClose = () => {
-    if (pcId) {
-      void window.remoteApi.stopWebcam(pcId);
-    }
-    onClose();
-  };
+const handleClose = () => {
+  setPreviewUrl('');
+  setHasStream(false);
+  setRecording(false);
+  setStatus('Closed');
+
+  if (pcId) {
+    void window.remoteApi.stopWebcam(pcId);
+  }
+
+  onClose();
+};
 
   const handleStartWebcam = async () => {
     if (!pcId) {

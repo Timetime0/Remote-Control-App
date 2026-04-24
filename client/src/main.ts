@@ -10,7 +10,6 @@ if (started) {
 }
 
 const createWindow = () => {
-  // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -19,7 +18,6 @@ const createWindow = () => {
     },
   });
 
-  // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -44,6 +42,8 @@ let remotePcConfig: RemotePcConfig[] = [];
 const screenViewerSockets = new Map<string, net.Socket>();
 const webcamSockets = new Map<string, net.Socket>();
 
+const AGENT_REPLY_END = '\n<<END>>\n';
+
 const withStatuses = async (): Promise<RemotePc[]> => {
   const statuses = await Promise.all(
     remotePcConfig.map(async (pc) => {
@@ -59,9 +59,7 @@ const withStatuses = async (): Promise<RemotePc[]> => {
   return statuses;
 };
 
-const AGENT_REPLY_END = '\n<<END>>\n';
-
-/** Đọc đến khi đủ `\n<<END>>\n` — khớp giao thức agent; tránh cắt nhầm ở byte đầu tiên có `\n`. */
+/** Đọc đến khi đủ \n<<END>>\n */
 const sendAgentCommand = (
   host: string,
   port: number,
@@ -77,6 +75,7 @@ const sendAgentCommand = (
       if (finished) return;
       finished = true;
       socket.destroy();
+
       if (err) {
         reject(err);
       } else {
@@ -85,9 +84,11 @@ const sendAgentCommand = (
     };
 
     socket.setTimeout(timeoutMs, () => done(new Error('Agent timeout')));
+
     socket.connect(port, host, () => {
       socket.write(`${command}\n`);
     });
+
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       const pos = buffer.indexOf(AGENT_REPLY_END);
@@ -95,113 +96,155 @@ const sendAgentCommand = (
         done(undefined, buffer.slice(0, pos));
       }
     });
+
     socket.on('error', (err) => done(err));
   });
 
-  function startScreenViewer(
-    pcId: string,
-    host: string,
-    port: number,
-    win: BrowserWindow,
-  ) {
-    if (screenViewerSockets.has(pcId)) {
-      return;
-    }
-  
-    const socket = new net.Socket();
-    let buffer = '';
-  
-    socket.connect(port, host, () => {
-      socket.write('SCREEN_VIEWER_START\n');
-    });
-  
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString('utf8');
-    
-      let pos: number;
-      while ((pos = buffer.indexOf('\n<<END>>\n')) !== -1) {
-        const rawMessage = buffer.slice(0, pos).trim();
-        buffer = buffer.slice(pos + '\n<<END>>\n'.length);
-    
-        if (!rawMessage) continue;
-    
-        try {
-          const parsed = JSON.parse(rawMessage);
-    
-          win.webContents.send('agent:screen-viewer-frame', parsed);
-        } catch {
-          // ignore invalid json
-        }
-      }
-    });
-  
-    socket.on('close', () => {
-      screenViewerSockets.delete(pcId);
-    });
-  
-    socket.on('error', () => {
-      screenViewerSockets.delete(pcId);
-    });
-  
-    screenViewerSockets.set(pcId, socket);
+function startScreenViewer(
+  pcId: string,
+  host: string,
+  port: number,
+  win: BrowserWindow,
+) {
+  if (screenViewerSockets.has(pcId)) {
+    return;
   }
 
-  function startWebcamStream(
-    pcId: string,
-    host: string,
-    port: number,
-    win: BrowserWindow,
-  ) {
+  const socket = new net.Socket();
+  let buffer = '';
+
+  socket.connect(port, host, () => {
+    socket.write('SCREEN_VIEWER_START\n');
+  });
+
+  socket.on('data', (chunk) => {
+    buffer += chunk.toString('utf8');
+
+    let pos: number;
+    while ((pos = buffer.indexOf(AGENT_REPLY_END)) !== -1) {
+      const rawMessage = buffer.slice(0, pos).trim();
+      buffer = buffer.slice(pos + AGENT_REPLY_END.length);
+
+      if (!rawMessage) continue;
+
+      try {
+        const parsed = JSON.parse(rawMessage);
+        win.webContents.send('agent:screen-viewer-frame', parsed);
+      } catch {
+        // ignore invalid json
+      }
+    }
+  });
+
+  socket.on('close', () => {
+    screenViewerSockets.delete(pcId);
+  });
+
+  socket.on('error', () => {
+    screenViewerSockets.delete(pcId);
+  });
+
+  screenViewerSockets.set(pcId, socket);
+}
+
+function startWebcamStream(
+  pcId: string,
+  host: string,
+  port: number,
+  win: BrowserWindow,
+): Promise<{ ok: boolean; message?: string }> {
+  return new Promise((resolve) => {
     if (webcamSockets.has(pcId)) {
-      console.warn('[webcam-main] startWebcamStream: socket already exists for pcId, skipping', pcId);
+      resolve({ ok: true, message: 'already_running' });
       return;
     }
 
-    console.log('[webcam-main] connecting', { pcId, host, port });
-
     const socket = new net.Socket();
     let buffer = '';
-    let recvLogCount = 0;
+    let settled = false;
+
+    const finish = (result: { ok: boolean; message?: string }) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    socket.setTimeout(10000, () => {
+      try {
+        win.webContents.send('agent:webcam-frame', {
+          ok: false,
+          command: 'WEBCAM_START',
+          message: 'Agent timeout while starting webcam',
+        });
+      } catch {
+        // ignore
+      }
+
+      socket.destroy();
+      webcamSockets.delete(pcId);
+      finish({ ok: false, message: 'Agent timeout while starting webcam' });
+    });
 
     socket.connect(port, host, () => {
-      console.log('[webcam-main] connected, sending WEBCAM_START');
       socket.write('WEBCAM_START\n');
     });
 
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
-      if (recvLogCount < 3) {
-        recvLogCount += 1;
-        console.log('[webcam-main] recv chunk', recvLogCount, 'bytes=', chunk.length, 'bufferLen=', buffer.length);
-      }
 
       let pos: number;
-      while ((pos = buffer.indexOf('\n<<END>>\n')) !== -1) {
+      while ((pos = buffer.indexOf(AGENT_REPLY_END)) !== -1) {
         const rawMessage = buffer.slice(0, pos).trim();
-        buffer = buffer.slice(pos + '\n<<END>>\n'.length);
+        buffer = buffer.slice(pos + AGENT_REPLY_END.length);
 
         if (!rawMessage) continue;
 
         try {
           const parsed = JSON.parse(rawMessage) as Record<string, unknown>;
-          const cmd = typeof parsed.command === 'string' ? parsed.command : '?';
-          const ok = parsed.ok === true;
-          const dataLen = typeof parsed.data === 'string' ? parsed.data.length : 0;
-          console.log('[webcam-main] parsed message', { command: cmd, ok, dataLen, rawHead: rawMessage.slice(0, 120) });
           win.webContents.send('agent:webcam-frame', parsed);
+
+          const cmd = typeof parsed.command === 'string' ? parsed.command : '';
+          const ok = parsed.ok === true;
+          const message =
+            typeof parsed.message === 'string' ? parsed.message : undefined;
+
+          if (cmd === 'WEBCAM_START') {
+            if (ok) {
+              webcamSockets.set(pcId, socket);
+              finish({ ok: true });
+            } else {
+              socket.destroy();
+              webcamSockets.delete(pcId);
+              finish({ ok: false, message: message ?? 'Cannot start webcam' });
+            }
+          }
         } catch (e) {
-          console.warn('[webcam-main] JSON.parse failed', (e as Error).message, 'rawHead=', rawMessage.slice(0, 200));
+          console.warn('[webcam-main] JSON.parse failed', (e as Error).message);
         }
       }
     });
 
     socket.on('close', () => {
-      console.log('[webcam-main] socket closed', pcId);
       webcamSockets.delete(pcId);
+
+      if (!settled) {
+        finish({ ok: false, message: 'Webcam socket closed before start confirmation' });
+      }
+
+      try {
+        win.webContents.send('agent:webcam-frame', {
+          ok: false,
+          command: 'WEBCAM_STOP',
+          message: 'Webcam socket closed',
+        });
+      } catch {
+        // ignore
+      }
     });
 
     socket.on('error', (err) => {
-      console.warn('[webcam-main] socket error', pcId, err.message);
+      webcamSockets.delete(pcId);
+
       try {
         win.webContents.send('agent:webcam-frame', {
           ok: false,
@@ -209,45 +252,41 @@ const sendAgentCommand = (
           message: `socket: ${err.message}`,
         });
       } catch {
-        // window may be gone
+        // ignore
       }
-      webcamSockets.delete(pcId);
+
+      finish({ ok: false, message: err.message });
     });
+  });
+}
 
-    webcamSockets.set(pcId, socket);
+function stopWebcamStream(pcId: string) {
+  const socket = webcamSockets.get(pcId);
+  if (!socket) return;
+
+  try {
+    socket.write('WEBCAM_STOP\n');
+  } catch {
+    // ignore
   }
 
-  function stopWebcamStream(pcId: string) {
-    const socket = webcamSockets.get(pcId);
-    if (!socket) {
-      console.log('[webcam-main] stopWebcamStream: no socket for', pcId);
-      return;
-    }
+  socket.destroy();
+  webcamSockets.delete(pcId);
+}
 
-    console.log('[webcam-main] stopWebcamStream', pcId);
-    try {
-      socket.write('WEBCAM_STOP\n');
-    } catch {
-      // ignore
-    }
+function stopScreenViewer(pcId: string) {
+  const socket = screenViewerSockets.get(pcId);
+  if (!socket) return;
 
-    socket.destroy();
-    webcamSockets.delete(pcId);
+  try {
+    socket.write('SCREEN_VIEWER_STOP\n');
+  } catch {
+    // ignore
   }
-  
-  function stopScreenViewer(pcId: string) {
-    const socket = screenViewerSockets.get(pcId);
-    if (!socket) return;
-  
-    try {
-      socket.write('SCREEN_VIEWER_STOP\n');
-    } catch {
-      // ignore
-    }
-  
-    socket.destroy();
-    screenViewerSockets.delete(pcId);
-  }
+
+  socket.destroy();
+  screenViewerSockets.delete(pcId);
+}
 
 ipcMain.handle('agent:list-pcs', async (): Promise<RemotePc[]> => withStatuses());
 
@@ -264,6 +303,7 @@ ipcMain.handle(
     if (!host) {
       throw new Error('Server IP/host is required');
     }
+
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error('Port must be between 1 and 65535');
     }
@@ -281,6 +321,7 @@ ipcMain.handle(
         },
       ];
     }
+
     return withStatuses();
   },
 );
@@ -298,8 +339,10 @@ ipcMain.handle('agent:run-command', async (_event, payload: { pcId: string; comm
   if (!target) {
     return { ok: false, message: 'Unknown target PC', raw: '' };
   }
+
   try {
     let timeoutMs = 2500;
+
     if (payload.command === 'SCREENSHOT') timeoutMs = 12000;
     else if (payload.command === 'WEBCAM_RECORD_STOP') timeoutMs = 20000;
     else if (
@@ -309,6 +352,7 @@ ipcMain.handle('agent:run-command', async (_event, payload: { pcId: string; comm
     ) {
       timeoutMs = 30000;
     }
+
     const raw = await sendAgentCommand(target.host, target.port, payload.command, timeoutMs);
     return { ok: raw.includes('"ok":true'), message: 'Command executed', raw };
   } catch (error) {
@@ -321,10 +365,12 @@ ipcMain.handle('agent:run-line', async (_event, payload: { pcId: string; line: s
   if (!target) {
     return { ok: false, message: 'Unknown target PC', raw: '' };
   }
+
   const line = payload.line.trim();
   if (!line) {
     return { ok: false, message: 'Empty command line', raw: '' };
   }
+
   try {
     const raw = await sendAgentCommand(target.host, target.port, line);
     return { ok: raw.includes('"ok":true'), message: 'Command executed', raw };
@@ -337,13 +383,17 @@ ipcMain.handle(
   'agent:upload-file',
   async (_event, payload: { pcId: string; localPath: string; remotePath: string }) => {
     const target = remotePcConfig.find((pc) => pc.id === payload.pcId);
-    if (!target) return { ok: false, message: 'Unknown target PC', raw: '' };
+    if (!target) {
+      return { ok: false, message: 'Unknown target PC', raw: '' };
+    }
 
     const localPath = payload.localPath.trim();
     const remotePath = payload.remotePath.trim();
+
     if (!localPath || !remotePath) {
       return { ok: false, message: 'Local path and remote path are required', raw: '' };
     }
+
     try {
       const bytes = await fs.readFile(localPath);
       const b64 = bytes.toString('base64');
@@ -360,13 +410,17 @@ ipcMain.handle(
   'agent:download-file',
   async (_event, payload: { pcId: string; remotePath: string; localPath: string }) => {
     const target = remotePcConfig.find((pc) => pc.id === payload.pcId);
-    if (!target) return { ok: false, message: 'Unknown target PC', raw: '' };
+    if (!target) {
+      return { ok: false, message: 'Unknown target PC', raw: '' };
+    }
 
     const remotePath = payload.remotePath.trim();
     const localPath = payload.localPath.trim();
+
     if (!remotePath || !localPath) {
       return { ok: false, message: 'Remote path and local path are required', raw: '' };
     }
+
     try {
       const raw = await sendAgentCommand(
         target.host,
@@ -374,10 +428,12 @@ ipcMain.handle(
         `READ_FILE_BASE64 ${remotePath}`,
         120000,
       );
+
       const parsed = JSON.parse(raw) as { ok?: boolean; data?: string; message?: string };
       if (parsed.ok !== true || typeof parsed.data !== 'string') {
         return { ok: false, message: parsed.message ?? 'Download failed', raw };
       }
+
       await fs.writeFile(localPath, Buffer.from(parsed.data, 'base64'));
       return { ok: true, message: 'Download executed', raw };
     } catch (error) {
@@ -390,6 +446,7 @@ ipcMain.handle('agent:pick-local-file', async (): Promise<string | null> => {
   const result = await dialog.showOpenDialog({
     properties: ['openFile'],
   });
+
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
 });
@@ -398,15 +455,22 @@ ipcMain.handle('agent:pick-save-file', async (_event, payload: { defaultPath?: s
   const result = await dialog.showSaveDialog({
     defaultPath: payload.defaultPath || 'downloaded-file',
   });
+
   if (result.canceled || !result.filePath) return null;
   return result.filePath;
 });
 
 ipcMain.handle('agent:list-files', async (_event, payload: { pcId: string; dir: string }) => {
   const target = remotePcConfig.find((pc) => pc.id === payload.pcId);
-  if (!target) return { ok: false, message: 'Unknown target PC', items: [] as string[], raw: '' };
+  if (!target) {
+    return { ok: false, message: 'Unknown target PC', items: [] as string[], raw: '' };
+  }
+
   const dir = payload.dir.trim();
-  if (!dir) return { ok: false, message: 'Directory is required', items: [] as string[], raw: '' };
+  if (!dir) {
+    return { ok: false, message: 'Directory is required', items: [] as string[], raw: '' };
+  }
+
   try {
     const raw = await sendAgentCommand(target.host, target.port, `LIST_FILES ${dir}`, 12000);
     const parsed = JSON.parse(raw) as { ok?: boolean; items?: unknown; message?: string };
@@ -414,12 +478,10 @@ ipcMain.handle('agent:list-files', async (_event, payload: { pcId: string; dir: 
       parsed.ok && Array.isArray(parsed.items)
         ? parsed.items.filter((x): x is string => typeof x === 'string')
         : [];
+
     return {
       ok: parsed.ok === true,
-      message:
-        parsed.ok === true
-          ? `Found ${items.length} file(s)`
-          : parsed.message || 'List files failed',
+      message: parsed.ok === true ? `Found ${items.length} file(s)` : parsed.message || 'List files failed',
       items,
       raw,
     };
@@ -441,7 +503,6 @@ ipcMain.handle('agent:start-screen-viewer', async (_event, payload: { pcId: stri
   }
 
   startScreenViewer(payload.pcId, target.host, target.port, win);
-
   return { ok: true };
 });
 
@@ -462,9 +523,7 @@ ipcMain.handle('agent:start-webcam', async (_event, payload: { pcId: string }) =
     return { ok: false, message: 'Window not found' };
   }
 
-  startWebcamStream(payload.pcId, target.host, target.port, win);
-
-  return { ok: true };
+  return await startWebcamStream(payload.pcId, target.host, target.port, win);
 });
 
 ipcMain.handle('agent:stop-webcam', async (_event, payload: { pcId: string }) => {
@@ -472,17 +531,12 @@ ipcMain.handle('agent:stop-webcam', async (_event, payload: { pcId: string }) =>
   return { ok: true };
 });
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.on('ready', createWindow);
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   screenViewerSockets.forEach((socket) => socket.destroy());
   screenViewerSockets.clear();
+
   webcamSockets.forEach((socket) => socket.destroy());
   webcamSockets.clear();
 
@@ -492,12 +546,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  // On OS X it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
 });
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and import them here.
