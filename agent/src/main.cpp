@@ -1,68 +1,80 @@
-#include "commands.h"
-#include "screen_viewer.h"
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 
+#include "commands.h"
+
+#include <array>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <thread>
-#include <array>
-#include <string>
 
 #ifdef _WIN32
-#define NOMINMAX
 #include <winsock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "ws2_32.lib")
 using SocketType = SOCKET;
 #else
-#include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 using SocketType = int;
+#define INVALID_SOCKET (-1)
+#define SOCKET_ERROR (-1)
 #endif
 
-// ===== CLOSE SOCKET =====
-void closeSock(SocketType s) {
 #ifdef _WIN32
-    closesocket(s);
+static void closeSock(SocketType s) { closesocket(s); }
 #else
-    close(s);
+static void closeSock(SocketType s) { close(s); }
+#endif
+
+static bool init() {
+#ifdef _WIN32
+    WSADATA wsa{};
+    return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
+#else
+    return true;
 #endif
 }
 
-// ===== SENDALL =====
-void sendAll(SocketType sock, const std::string& data) {
+static void cleanupNet() {
+#ifdef _WIN32
+    WSACleanup();
+#endif
+}
+
+static void sendAll(SocketType client, const std::string& data) {
     size_t total = 0;
-
     while (total < data.size()) {
-        int sent = send(sock, data.c_str() + total, data.size() - total, 0);
-
-        if (sent <= 0) {
-            return;
-        }
-
-        total += sent;
+        int sent = send(
+            client,
+            data.c_str() + total,
+            static_cast<int>(data.size() - total),
+            0
+        );
+        if (sent <= 0) return;
+        total += static_cast<size_t>(sent);
     }
 }
 
-// ===== HANDLE CLIENT =====
-void handle(SocketType client) {
-    std::array<char, 1024> buf{};
+static void handle(SocketType client) {
+    std::array<char, 4096> buf{};
     std::string data;
 
     while (true) {
-        int n = recv(client, buf.data(), buf.size(), 0);
-
+        int n = recv(client, buf.data(), static_cast<int>(buf.size()), 0);
         if (n == 0) break;
         if (n < 0) break;
 
-        data.append(buf.data(), n);
+        data.append(buf.data(), static_cast<size_t>(n));
 
         size_t pos;
         while ((pos = data.find('\n')) != std::string::npos) {
             std::string line = data.substr(0, pos);
             data.erase(0, pos + 1);
 
-            std::string res = process(line, client) + "\n<<END>>\n";
+            std::string res = process(line, client);
+            res += "\n<<END>>\n";
             sendAll(client, res);
         }
     }
@@ -70,86 +82,62 @@ void handle(SocketType client) {
     closeSock(client);
 }
 
-// ===== INIT SOCKET =====
-bool init() {
-#ifdef _WIN32
-    WSADATA d;
-    return WSAStartup(MAKEWORD(2, 2), &d) == 0;
-#else
-    return true;
-#endif
-}
-
-// ===== CLEANUP =====
-void shutdownSock() {
-#ifdef _WIN32
-    WSACleanup();
-#endif
-}
-
-// ===== MAIN =====
-int main(int argc, char** argv) {
+int main() {
     if (!init()) {
-        std::cerr << "Socket init failed\n";
+        std::cerr << "WSAStartup failed\n";
         return 1;
     }
 
-    int port = 5050;
-    if (argc >= 2) {
-        const int p = std::atoi(argv[1]);
-        if (p > 0 && p <= 65535) {
-            port = p;
-        } else {
-            std::cerr << "Invalid port, using 5050\n";
-        }
-    }
-
-    SocketType server = socket(AF_INET, SOCK_STREAM, 0);
-    if (server < 0) {
+    SocketType serverSock = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSock == INVALID_SOCKET) {
         std::cerr << "Cannot create socket\n";
+        cleanupNet();
         return 1;
     }
 
-    // fix loi restart server bi chiem port
-    int opt = 1;
-#ifdef _WIN32
-    setsockopt(server, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
-#else
-    setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#endif
+    sockaddr_in serverAddr{};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(5050);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(static_cast<unsigned short>(port));
-    addr.sin_addr.s_addr = INADDR_ANY;
-
-    if (bind(server, (sockaddr*)&addr, sizeof(addr)) < 0) {
+    if (bind(serverSock, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr)) == SOCKET_ERROR) {
         std::cerr << "Bind failed\n";
+        closeSock(serverSock);
+        cleanupNet();
         return 1;
     }
 
-    if (listen(server, 10) < 0) {
+    if (listen(serverSock, 5) == SOCKET_ERROR) {
         std::cerr << "Listen failed\n";
+        closeSock(serverSock);
+        cleanupNet();
         return 1;
     }
 
-    std::cout << "Server running on port " << port << "...\n";
+    std::cout << "Agent listening on port 5050...\n";
 
     while (true) {
-        sockaddr_in client{};
+        sockaddr_in clientAddr{};
 #ifdef _WIN32
-        int len = sizeof(client);
+        int clientLen = sizeof(clientAddr);
 #else
-        socklen_t len = sizeof(client);
+        socklen_t clientLen = sizeof(clientAddr);
 #endif
 
-        SocketType c = accept(server, (sockaddr*)&client, &len);
-        if (c < 0) continue;
+        SocketType client = accept(
+            serverSock,
+            reinterpret_cast<sockaddr*>(&clientAddr),
+            &clientLen
+        );
 
-        std::thread(handle, c).detach();
+        if (client == INVALID_SOCKET) {
+            continue;
+        }
+
+        std::thread(handle, client).detach();
     }
 
-    closeSock(server);
-    shutdownSock();
+    closeSock(serverSock);
+    cleanupNet();
     return 0;
 }
