@@ -8,6 +8,10 @@
 #include <iostream>
 #include <thread>
 
+#ifndef AGENT_PORT
+#define AGENT_PORT 5050
+#endif
+
 #ifdef _WIN32
 #include <winsock2.h>
 #pragma comment(lib, "ws2_32.lib")
@@ -97,7 +101,7 @@ int main() {
 
     sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(5050);
+    serverAddr.sin_port = htons(AGENT_PORT);
     serverAddr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(serverSock, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr)) == SOCKET_ERROR) {
@@ -114,7 +118,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "Agent listening on port 5050...\n";
+    std::cout << "Agent listening on port " << AGENT_PORT << "...\n";
 
     while (true) {
         sockaddr_in clientAddr{};
