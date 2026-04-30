@@ -15,6 +15,7 @@
 #include <sstream>
 #include <vector>
 #include <string>
+#include <limits>
 
 static std::vector<std::string> split(const std::string& s) {
     std::istringstream iss(s);
@@ -43,6 +44,19 @@ static bool parseWriteFileBase64Line(const std::string& t, std::string& b64, std
     b64 = body.substr(0, sp);
     path = trim(body.substr(sp + 1));
     return !b64.empty() && !path.empty();
+}
+
+static bool tryParseInt(const std::string& s, int& out) {
+    try {
+        size_t idx = 0;
+        long v = std::stol(s, &idx, 10);
+        if (idx != s.size()) return false;
+        if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) return false;
+        out = static_cast<int>(v);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 // ===== ROUTER =====
@@ -119,18 +133,27 @@ std::string process(const std::string& line, SocketType client) {
     }
 
     if (cmd == "MOUSE_MOVE" && parts.size() >= 3) {
-        int x = std::stoi(parts[1]);
-        int y = std::stoi(parts[2]);
+        int x = 0;
+        int y = 0;
+        if (!tryParseInt(parts[1], x) || !tryParseInt(parts[2], y)) {
+            return jsonCommandResponse(false, "bad_args", cmd);
+        }
         return mouseMoveJson(x, y);
     }
     if (cmd == "MOUSE_LEFT_CLICK" && parts.size() >= 3) {
-        int x = std::stoi(parts[1]);
-        int y = std::stoi(parts[2]);
+        int x = 0;
+        int y = 0;
+        if (!tryParseInt(parts[1], x) || !tryParseInt(parts[2], y)) {
+            return jsonCommandResponse(false, "bad_args", cmd);
+        }
         return mouseLeftClickJson(x, y);
     }
     if (cmd == "MOUSE_RIGHT_CLICK" && parts.size() >= 3) {
-        int x = std::stoi(parts[1]);
-        int y = std::stoi(parts[2]);
+        int x = 0;
+        int y = 0;
+        if (!tryParseInt(parts[1], x) || !tryParseInt(parts[2], y)) {
+            return jsonCommandResponse(false, "bad_args", cmd);
+        }
         return mouseRightClickJson(x, y);
     }
 

@@ -86,10 +86,22 @@ static void handle(SocketType client) {
     closeSock(client);
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     if (!init()) {
         std::cerr << "WSAStartup failed\n";
         return 1;
+    }
+
+    int port = AGENT_PORT;
+    if (argc >= 2) {
+        char* end = nullptr;
+        long parsed = std::strtol(argv[1], &end, 10);
+        if (end == argv[1] || *end != '\0' || parsed <= 0 || parsed > 65535) {
+            std::cerr << "Invalid port: " << argv[1] << "\n";
+            cleanupNet();
+            return 1;
+        }
+        port = static_cast<int>(parsed);
     }
 
     SocketType serverSock = socket(AF_INET, SOCK_STREAM, 0);
@@ -101,7 +113,7 @@ int main() {
 
     sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(AGENT_PORT);
+    serverAddr.sin_port = htons(static_cast<uint16_t>(port));
     serverAddr.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(serverSock, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr)) == SOCKET_ERROR) {
@@ -118,7 +130,7 @@ int main() {
         return 1;
     }
 
-    std::cout << "Agent listening on port " << AGENT_PORT << "...\n";
+    std::cout << "Agent listening on port " << port << "...\n";
 
     while (true) {
         sockaddr_in clientAddr{};
