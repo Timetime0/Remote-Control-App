@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(AGENT_PORT "5050" CACHE STRING "TCP port for remote_agent to listen on")
+
 add_executable(remote_agent
     src/main.cpp
     src/commands.cpp
@@ -20,6 +22,8 @@ add_executable(remote_agent
     src/mouse_control.cpp
     src/screen_viewer.cpp
 )
+
+target_compile_definitions(remote_agent PRIVATE AGENT_PORT=${AGENT_PORT})
 
 if(WIN32)
   target_link_libraries(remote_agent ws2_32 user32)

@@ -3,8 +3,10 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #ifdef _WIN32
@@ -51,40 +53,37 @@ static std::string resolveWritePath(const std::string& path) {
 #endif
 }
 
-#ifndef _WIN32
 static std::string expandTildeUnixPath(const std::string& path) {
+#ifndef _WIN32
     if (path.empty() || path[0] != '~') return path;
     const char* h = std::getenv("HOME");
     if (!h || !*h) return path;
     if (path == "~" || path == "~/") return std::string(h);
     if (path.size() >= 2 && path[1] == '/') return std::string(h) + path.substr(1);
     return path;
-}
 #endif
-
-static std::string shellSingleQuote(const std::string& s) {
-    std::string r = "'";
-    for (char c : s) {
-        if (c == '\'') r += "'\\''";
-        else r += c;
-    }
-    r += "'";
-    return r;
+    return path;
 }
 
+static std::filesystem::path toFsPath(const std::string& path) {
 #ifdef _WIN32
-static std::string escapeSingleQuotesPowerShell(const std::string& input) {
-    std::string out;
-    for (char c : input) {
-        if (c == '\'') out += "''";
-        else out += c;
-    }
-    return out;
-}
+    return std::filesystem::u8path(path);
+#else
+    return std::filesystem::path(path);
 #endif
+}
+
+static std::string fsPathToUtf8String(const std::filesystem::path& path) {
+#ifdef _WIN32
+    const auto u8 = path.u8string();
+    return std::string(u8.begin(), u8.end());
+#else
+    return path.string();
+#endif
+}
 
 std::string readFileBase64Json(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file(toFsPath(path), std::ios::binary);
     if (!file) {
         return "{\"ok\":false,\"command\":\"READ_FILE_BASE64\",\"message\":\"open_failed\"}";
     }
@@ -109,7 +108,7 @@ std::string writeFileBase64Json(const std::string& path, const std::string& data
         return "{\"ok\":false,\"command\":\"WRITE_FILE_BASE64\",\"message\":\"invalid_base64\"}";
     }
     const std::string resolved = resolveWritePath(path);
-    std::ofstream file(resolved, std::ios::binary);
+    std::ofstream file(toFsPath(resolved), std::ios::binary);
     if (!file) {
         return "{\"ok\":false,\"command\":\"WRITE_FILE_BASE64\",\"message\":\"open_failed\"}";
     }
@@ -127,40 +126,31 @@ std::string writeFileBase64Json(const std::string& path, const std::string& data
 }
 
 std::string listFilesJson(const std::string& dirPath) {
-#ifdef _WIN32
-    const std::string cmd =
-        "powershell -NoProfile -Command \"Get-ChildItem -LiteralPath '" +
-        escapeSingleQuotesPowerShell(dirPath) +
-        "' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName\"";
-    const std::string out = runShellCommand(cmd);
-    std::vector<std::string> lines = splitLines(out);
-    std::string items = "[";
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (i > 0) items += ",";
-        items += "\"" + escapeJson(lines[i]) + "\"";
-    }
-    items += "]";
-#else
     const std::string expanded = expandTildeUnixPath(trim(dirPath));
-    const std::string cmd =
-        "sh -c \"ls -1p " + shellSingleQuote(expanded) + " 2>/dev/null | tr -d '\\r'\"";
-    const std::string out = runShellCommand(cmd);
-    std::vector<std::string> lines = splitLines(out);
+    const std::filesystem::path dir = toFsPath(expanded);
+    std::error_code ec;
+
+    if (!std::filesystem::exists(dir, ec) || ec) {
+        return "{\"ok\":false,\"command\":\"LIST_FILES\",\"message\":\"dir_not_found\",\"dir\":\"" +
+               escapeJson(dirPath) + "\"}";
+    }
+
+    if (!std::filesystem::is_directory(dir, ec) || ec) {
+        return "{\"ok\":false,\"command\":\"LIST_FILES\",\"message\":\"not_a_directory\",\"dir\":\"" +
+               escapeJson(dirPath) + "\"}";
+    }
+
     std::string items = "[";
     bool firstItem = true;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        std::string name = lines[i];
-        while (!name.empty() && (name.back() == '/' || name.back() == '\\')) name.pop_back();
-        if (name.empty()) continue;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (ec) break;
+        const std::string full = fsPathToUtf8String(entry.path());
+        if (full.empty()) continue;
         if (!firstItem) items += ",";
         firstItem = false;
-        std::string full = expanded;
-        if (!full.empty() && full.back() != '/' && full.back() != '\\') full += "/";
-        full += name;
         items += "\"" + escapeJson(full) + "\"";
     }
     items += "]";
-#endif
     return "{\"ok\":true,\"command\":\"LIST_FILES\",\"dir\":\"" + escapeJson(dirPath) +
            "\",\"items\":" + items + "}";
 }
